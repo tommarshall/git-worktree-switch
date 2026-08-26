@@ -242,6 +242,8 @@ _wt() {
     esac
   done < <(git worktree list --porcelain -z 2>/dev/null)
 
+  # SC2207: word-splitting is the intended completion idiom; mapfile is absent in bash 3.2.
+  # shellcheck disable=SC2207
   COMPREPLY=( $(compgen -W "$candidates" -- "$cur") )
 }
 
