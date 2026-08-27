@@ -40,3 +40,6 @@ Both must be green. `lint` is shellcheck; `test` is `test.sh`.
   users can rename from their profile without editing the script.
 - **Never name a variable `path`.** In zsh `path` is `$PATH` as an array;
   clobbering it makes git vanish. Use `wtpath`.
+- **Name variables so they read.** Prefer a word to an abbreviation: `chosen`
+  not `tgt`, `dir` not `p`, `needle`/`hay` for a match. Loop counters (`i`, `n`)
+  and the glossary's own terms (`head`, `label`, `query`) are the exceptions.

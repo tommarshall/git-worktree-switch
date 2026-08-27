@@ -63,12 +63,12 @@ _wt_recover() {
   [ -n "${ZSH_VERSION:-}" ] && emulate -L zsh 2>/dev/null && \
     setopt ksh_arrays sh_word_split no_nomatch
 
-  local p="$PWD"
-  while [ -n "$p" ] && [ "$p" != "/" ]; do
-    p="${p%/*}"
-    [ -z "$p" ] && break
-    if [ -d "$p" ] && git -C "$p" rev-parse --git-dir >/dev/null 2>&1; then
-      cd "$p" || return 1
+  local dir="$PWD"
+  while [ -n "$dir" ] && [ "$dir" != "/" ]; do
+    dir="${dir%/*}"
+    [ -z "$dir" ] && break
+    if [ -d "$dir" ] && git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
+      cd "$dir" || return 1
       return 0
     fi
   done
@@ -172,18 +172,18 @@ _wt_match() {
   [ -n "${ZSH_VERSION:-}" ] && emulate -L zsh 2>/dev/null && \
     setopt ksh_arrays sh_word_split no_nomatch
 
-  local query="$1" q_lc
-  q_lc=$(printf '%s' "$query" | tr '[:upper:]' '[:lower:]')
+  local query="$1" needle
+  needle=$(printf '%s' "$query" | tr '[:upper:]' '[:lower:]')
 
   local labels=() paths=() label wtpath
   while IFS= read -r -d '' label && IFS= read -r -d '' wtpath; do
     labels+=("$label"); paths+=("$wtpath")
   done
 
-  local count="${#labels[@]}" i=0 matched=0 lc
+  local count="${#labels[@]}" i=0 matched=0 hay
   while [ "$i" -lt "$count" ]; do
-    lc=$(printf '%s' "${labels[$i]}" | tr '[:upper:]' '[:lower:]')
-    case "$lc" in *"$q_lc"*)
+    hay=$(printf '%s' "${labels[$i]}" | tr '[:upper:]' '[:lower:]')
+    case "$hay" in *"$needle"*)
       printf '%s\0%s\0' "${labels[$i]}" "${paths[$i]}"; matched=1 ;;
     esac
     i=$((i + 1))
@@ -192,8 +192,8 @@ _wt_match() {
 
   i=0
   while [ "$i" -lt "$count" ]; do
-    lc=$(printf '%s' "${paths[$i]}" | tr '[:upper:]' '[:lower:]')
-    case "$lc" in *"$q_lc"*)
+    hay=$(printf '%s' "${paths[$i]}" | tr '[:upper:]' '[:lower:]')
+    case "$hay" in *"$needle"*)
       printf '%s\0%s\0' "${labels[$i]}" "${paths[$i]}" ;;
     esac
     i=$((i + 1))
