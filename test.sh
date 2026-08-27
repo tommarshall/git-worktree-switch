@@ -74,7 +74,7 @@ menu_from() { # startdir args...
   wt "$@" <<< "" 2>/dev/null
 }
 
-# shellcheck disable=SC2317  # invoked indirectly via the EXIT trap below
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via the EXIT trap below
 cleanup() { [ -n "${ROOT:-}" ] && rm -rf "$ROOT"; }
 trap cleanup EXIT
 
