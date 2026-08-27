@@ -239,7 +239,7 @@ _wt_pick() {
   # to the conductor as a fresh query (requery) to re-match by name/path, so a
   # branch literally named `1234` still resolves.
   if [ -z "$reply" ]; then
-    printf '%s: invalid selection\n' "$WT_CMD" >&2
+    printf '%s: nothing selected\n' "$WT_CMD" >&2
     return 1
   fi
   case "$reply" in

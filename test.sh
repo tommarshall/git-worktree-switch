@@ -73,8 +73,8 @@ rownum_for() { # menu path
   printf '%s' "${row%%)*}" | tr -dc '0-9'
 }
 
-# Show the picker menu without choosing anything (empty reply => "invalid
-# selection" on stderr, no cd), so we can inspect it in a subshell cleanly.
+# Show the picker menu without choosing anything (empty reply => "nothing
+# selected" on stderr, no cd), so we can inspect it in a subshell cleanly.
 menu_from() { # startdir args...
   at "$1"; shift
   wt "$@" <<< "" 2>/dev/null
@@ -235,7 +235,7 @@ test_picker_empty_reply_cancels() {
   wt <<< "" > "$ROOT/msg" 2>&1 || true
   msg=$(cat "$ROOT/msg")
   eq  "$PWD" "$before"          "picker: empty reply does not move"
-  has "$msg" "invalid selection" "picker: empty reply reports invalid selection"
+  has "$msg" "nothing selected" "picker: empty reply reports nothing selected"
 }
 
 test_one_worktree_is_a_noop() {
