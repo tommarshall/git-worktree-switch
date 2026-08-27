@@ -66,6 +66,12 @@ none reports no match. An empty reply cancels.
 The current worktree is marked with `*`. A detached HEAD shows as `(detached)`;
 the bare repo, if any, is skipped.
 
+If the worktree you're standing in gets removed while you're in it (say another
+tool deletes it), your shell is left in a directory that no longer exists and
+git can't run. `wt` notices this and recovers — it steps back to a surviving
+worktree first, then carries on — so you can switch away instead of getting
+stranded. `wt -` also works as an escape hatch in that situation.
+
 Tab completion completes branch names and worktree folder names.
 
 ```

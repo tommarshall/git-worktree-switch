@@ -230,6 +230,21 @@ test_dash_returns_to_previous() {
   eq "$PWD" "$P_ALPHA" "'wt -' returns to the previous worktree"
 }
 
+# When the worktree you're standing in is removed, $PWD points at a directory
+# that no longer exists and git can't run. `wt` should climb back to a
+# surviving worktree (here via the WT_LAST fallback) instead of erroring, then
+# carry on and resolve the requested jump.
+test_recovers_from_removed_cwd() {
+  git -C "$BARE" worktree add -q "$ROOT/wt-doomed" -b doomed >/dev/null 2>&1
+  at "$P_ALPHA"; wt feature-beta         # arm WT_LAST=P_ALPHA (a survivor)
+  at "$ROOT/wt-doomed"                    # now standing in the doomed worktree
+  rm -rf "$ROOT/wt-doomed"               # removed out from under us
+  git -C "$BARE" worktree prune
+
+  wt quxpath >/dev/null 2>&1              # from the dead cwd: recover, then jump
+  eq "$PWD" "$P_QUX" "recovers from a removed cwd and still resolves the jump"
+}
+
 # --------------------------------------------------------------------------
 # Run
 # --------------------------------------------------------------------------
@@ -247,6 +262,7 @@ test_picker_out_of_range_number_matches_name
 test_picker_empty_reply_cancels
 test_one_worktree_is_a_noop
 test_dash_returns_to_previous
+test_recovers_from_removed_cwd
 
 printf '\n%s under %s: %d passed, %d failed\n' \
   "$(basename "$0")" "${ZSH_VERSION:+zsh}${BASH_VERSION:+bash}" "$PASS" "$FAIL"

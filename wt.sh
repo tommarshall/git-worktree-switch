@@ -48,6 +48,40 @@ _wt_cd() {
 }
 
 #
+# Recover when the current directory has vanished — typically this very
+# worktree was removed out from under us. $PWD still holds the stale path but
+# the directory is gone, so git can't run at all. Find a surviving worktree to
+# stand on and cd there, so both git and the user are back on solid ground:
+#   1. climb the stale $PWD to the nearest ancestor that still exists and lives
+#      in a work tree (handles worktrees nested under the repo);
+#   2. failing that, fall back to WT_LAST — where we last jumped from (handles
+#      the classic bare-repo-with-sibling-worktrees layout).
+# Returns 1 if neither yields a directory git can run in.
+#
+_wt_recover() {
+  [ -n "${ZSH_VERSION:-}" ] && emulate -L zsh 2>/dev/null && \
+    setopt ksh_arrays sh_word_split no_nomatch
+
+  local p="$PWD"
+  while [ -n "$p" ] && [ "$p" != "/" ]; do
+    p="${p%/*}"
+    [ -z "$p" ] && break
+    if [ -d "$p" ] && git -C "$p" rev-parse --git-dir >/dev/null 2>&1; then
+      cd "$p" || return 1
+      return 0
+    fi
+  done
+
+  if [ -n "${WT_LAST:-}" ] && [ -d "$WT_LAST" ] && \
+     git -C "$WT_LAST" rev-parse --git-dir >/dev/null 2>&1; then
+    cd "$WT_LAST" || return 1
+    return 0
+  fi
+
+  return 1
+}
+
+#
 # How the internal functions share state
 # --------------------------------------------------------------------------
 # _wt_collect / _wt_match / _wt_pick fill or read the arrays `wt_paths`,
@@ -229,22 +263,28 @@ _wt_main() {
 
   local query="${1:-}"
 
+  # --- recover from a deleted cwd -------------------------------------------
+  # If this worktree was removed while we were standing in it, $PWD no longer
+  # exists and every git command below would fail with a misleading "not in a
+  # git repository". Climb back to a surviving worktree first (see _wt_recover),
+  # then carry on normally so the user lands in the picker instead of an error.
+  if [ ! -d "$PWD" ]; then
+    _wt_recover || {
+      printf '%s: current directory no longer exists (worktree removed?)\n' \
+        "$WT_CMD" >&2
+      return 1
+    }
+    printf '%s: current worktree was removed; recovered to %s\n' \
+      "$WT_CMD" "$PWD" >&2
+  fi
+
   # --- where are we now (absolute worktree root) ----------------------------
   local here=""
   here=$(git rev-parse --show-toplevel 2>/dev/null)
 
-  # --- gather worktrees (fills wt_paths / wt_labels; see the note above) ----
-  # shellcheck disable=SC2034  # filled by _wt_collect via dynamic scope
-  local wt_paths=() wt_labels=()
-  _wt_collect
-
-  local count="${#wt_paths[@]}"
-  if [ "$count" -eq 0 ]; then
-    printf '%s: not in a git repository (or no worktrees)\n' "$WT_CMD" >&2
-    return 1
-  fi
-
   # --- `wt -` : jump back to the previous worktree --------------------------
+  # Handled before we collect/count worktrees so it still works as an escape
+  # hatch even when the current directory is gone or we're outside a repo.
   if [ "$query" = "-" ]; then
     if [ -z "${WT_LAST:-}" ]; then
       printf '%s: no previous worktree\n' "$WT_CMD" >&2
@@ -256,6 +296,17 @@ _wt_main() {
     fi
     _wt_cd "$WT_LAST" "$here"
     return
+  fi
+
+  # --- gather worktrees (fills wt_paths / wt_labels; see the note above) ----
+  # shellcheck disable=SC2034  # filled by _wt_collect via dynamic scope
+  local wt_paths=() wt_labels=()
+  _wt_collect
+
+  local count="${#wt_paths[@]}"
+  if [ "$count" -eq 0 ]; then
+    printf '%s: not in a git repository (or no worktrees)\n' "$WT_CMD" >&2
+    return 1
   fi
 
   # --- decide the target, or the set of candidates to pick from -------------
