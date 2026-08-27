@@ -5,7 +5,7 @@
 #
 # Version 0.1.0
 #
-# https://github.com/tommarshall/wt
+# https://github.com/tommarshall/git-worktree-switch
 #
 # SOURCE this file from ~/.bashrc and ~/.zshrc (it is not executed):
 #
@@ -48,52 +48,59 @@ _wt_cd() {
 }
 
 #
-# The switcher itself. Wrapped as ${WT_CMD} at the bottom of the file.
+# How the internal functions share state
+# --------------------------------------------------------------------------
+# _wt_collect / _wt_match / _wt_pick fill or read the arrays `wt_paths`,
+# `wt_labels`, `match_idx` and the scalar `tgt`. Those names are declared
+# `local` in the conductor (`_wt_main`) ONLY; the callees assign to them
+# without re-declaring. Both bash and zsh use dynamic scope, so a callee
+# writes straight into the conductor's locals — no globals leak into the
+# interactive shell, and nothing is serialised across a subshell (a `$(...)`
+# capture would swallow the picker's prompt). This holds under the zsh
+# `emulate -L` guard, which localises options, not variable scope.
 #
-_wt_main() {
-  # --- portability guard (zsh only; local via emulate -L, does not leak) ---
+# Append one parsed record to `wt_paths` / `wt_labels` (caller's locals),
+# skipping the bare repo. Fields come in as args (explicit); the arrays are
+# reached by dynamic scope. $1 = path, $2 = branch, $3 = detached?, $4 = bare?
+#
+_wt_add_record() {
   [ -n "${ZSH_VERSION:-}" ] && emulate -L zsh 2>/dev/null && \
     setopt ksh_arrays sh_word_split no_nomatch
 
-  local query="${1:-}"
+  local wtpath="$1" branch="$2" is_detached="$3" is_bare="$4"
 
-  # --- colour: only on a tty, and only if git config doesn't forbid it ------
-  local C_CUR="" C_RST=""
-  if [ -t 1 ]; then
-    local ui
-    ui=$(git config --get color.ui 2>/dev/null)
-    case "$ui" in
-      never|false|off|no) : ;;
-      *) C_CUR=$'\033[1;32m'; C_RST=$'\033[0m' ;;
-    esac
+  [ -z "$wtpath" ] && return 0
+  [ "$is_bare" -eq 1 ] && return 0
+
+  # shellcheck disable=SC2154  # wt_paths/wt_labels are the conductor's locals
+  wt_paths+=("$wtpath")
+  if [ -n "$branch" ]; then
+    wt_labels+=("$branch")
+  elif [ "$is_detached" -eq 1 ]; then
+    wt_labels+=("(detached)")
+  else
+    wt_labels+=("(unknown)")
   fi
+}
 
-  # --- where are we now (absolute worktree root) ----------------------------
-  local here=""
-  here=$(git rev-parse --show-toplevel 2>/dev/null)
+# Collect the worktrees into `wt_paths` / `wt_labels` (caller's locals).
+#
+_wt_collect() {
+  [ -n "${ZSH_VERSION:-}" ] && emulate -L zsh 2>/dev/null && \
+    setopt ksh_arrays sh_word_split no_nomatch
 
-  # --- gather worktrees from porcelain -z (double-NUL record boundaries) -----
-  # Parse in pure shell (no awk/sed) per the house style. Branch on which
-  # lines a record carries: bare has neither HEAD nor branch (skip it);
-  # detached HEAD emits `detached` and NO branch line — never assume a branch.
+  # Parse `list --porcelain -z` (double-NUL record boundaries) in pure shell
+  # (no awk/sed) per the house style. Branch on which lines a record carries:
+  # bare has neither HEAD nor branch (skip it); detached HEAD emits `detached`
+  # and NO branch line — never assume a branch.
   # NOTE: do NOT name a variable `path` here — in zsh `path` is the array form
   # of $PATH, so `local path=...` would blow away PATH inside the function and
   # git would vanish. Use `wtpath`.
-  local wt_paths=() wt_labels=()
   local token wtpath="" branch="" is_detached=0 is_bare=0
   while IFS= read -r -d '' token; do
     if [ -z "$token" ]; then
       # record boundary — commit the record we just read
-      if [ -n "$wtpath" ] && [ "$is_bare" -eq 0 ]; then
-        wt_paths+=("$wtpath")
-        if [ -n "$branch" ]; then
-          wt_labels+=("$branch")
-        elif [ "$is_detached" -eq 1 ]; then
-          wt_labels+=("(detached)")
-        else
-          wt_labels+=("(unknown)")
-        fi
-      fi
+      _wt_add_record "$wtpath" "$branch" "$is_detached" "$is_bare"
       wtpath=""; branch=""; is_detached=0; is_bare=0
       continue
     fi
@@ -106,12 +113,113 @@ _wt_main() {
     esac
   done < <(git worktree list --porcelain -z 2>/dev/null)
   # safety net if a git build omits the trailing empty record
-  if [ -n "$wtpath" ] && [ "$is_bare" -eq 0 ]; then
-    wt_paths+=("$wtpath")
-    if [ -n "$branch" ]; then wt_labels+=("$branch")
-    elif [ "$is_detached" -eq 1 ]; then wt_labels+=("(detached)")
-    else wt_labels+=("(unknown)"); fi
+  _wt_add_record "$wtpath" "$branch" "$is_detached" "$is_bare"
+}
+
+#
+# Fill `match_idx` (caller's local) with the worktrees matching $1: branch
+# labels first, then paths only if no label matched. Case-insensitive substring.
+#
+_wt_match() {
+  [ -n "${ZSH_VERSION:-}" ] && emulate -L zsh 2>/dev/null && \
+    setopt ksh_arrays sh_word_split no_nomatch
+
+  # shellcheck disable=SC2154  # wt_paths/wt_labels are the conductor's locals
+  local query="$1" count="${#wt_paths[@]}" i=0
+  local q_lc lbl_lc path_lc
+  q_lc=$(printf '%s' "$query" | tr '[:upper:]' '[:lower:]')
+
+  while [ "$i" -lt "$count" ]; do
+    lbl_lc=$(printf '%s' "${wt_labels[$i]}" | tr '[:upper:]' '[:lower:]')
+    case "$lbl_lc" in *"$q_lc"*) match_idx+=("$i") ;; esac
+    i=$((i + 1))
+  done
+
+  if [ "${#match_idx[@]}" -eq 0 ]; then
+    i=0
+    while [ "$i" -lt "$count" ]; do
+      path_lc=$(printf '%s' "${wt_paths[$i]}" | tr '[:upper:]' '[:lower:]')
+      case "$path_lc" in *"$q_lc"*) match_idx+=("$i") ;; esac
+      i=$((i + 1))
+    done
   fi
+}
+
+#
+# Print the numbered candidate list (marker + colour), read a choice, and set
+# `tgt` (caller's local) to the chosen worktree index. $1 = current path (for
+# the `*` marker). Returns 1 on an invalid or out-of-range reply.
+#
+_wt_pick() {
+  [ -n "${ZSH_VERSION:-}" ] && emulate -L zsh 2>/dev/null && \
+    setopt ksh_arrays sh_word_split no_nomatch
+
+  local here="$1"
+
+  # --- colour: only on a tty, and only if git config doesn't forbid it ------
+  local C_CUR="" C_RST=""
+  if [ -t 1 ]; then
+    local ui
+    ui=$(git config --get color.ui 2>/dev/null)
+    case "$ui" in
+      never|false|off|no) : ;;
+      *) C_CUR=$'\033[1;32m'; C_RST=$'\033[0m' ;;
+    esac
+  fi
+
+  # shellcheck disable=SC2154  # match_idx/wt_paths/wt_labels are the conductor's locals
+  local n=0 idx marker reply
+  while [ "$n" -lt "${#match_idx[@]}" ]; do
+    idx="${match_idx[$n]}"
+    if [ -n "$here" ] && [ "${wt_paths[$idx]}" = "$here" ]; then
+      marker="*"
+    else
+      marker=" "
+    fi
+    if [ "$marker" = "*" ]; then
+      printf '%s%3d) %s %s  %s%s\n' "$C_CUR" "$((n + 1))" "$marker" \
+        "${wt_labels[$idx]}" "${wt_paths[$idx]}" "$C_RST"
+    else
+      printf '%3d) %s %s  %s\n' "$((n + 1))" "$marker" \
+        "${wt_labels[$idx]}" "${wt_paths[$idx]}"
+    fi
+    n=$((n + 1))
+  done
+
+  printf 'worktree #? '
+  IFS= read -r reply
+
+  case "$reply" in
+    ''|*[!0-9]*)
+      printf '%s: invalid selection\n' "$WT_CMD" >&2
+      return 1 ;;
+  esac
+  if [ "$reply" -lt 1 ] || [ "$reply" -gt "${#match_idx[@]}" ]; then
+    printf '%s: selection out of range\n' "$WT_CMD" >&2
+    return 1
+  fi
+  tgt="${match_idx[$((reply - 1))]}"
+}
+
+#
+# The switcher itself. Wrapped as ${WT_CMD} at the bottom of the file.
+# Thin conductor: guard, collect, route (`-` / no-arg / query), then jump.
+#
+_wt_main() {
+  # --- portability guard (zsh only; local via emulate -L, does not leak) ---
+  [ -n "${ZSH_VERSION:-}" ] && emulate -L zsh 2>/dev/null && \
+    setopt ksh_arrays sh_word_split no_nomatch
+
+  local query="${1:-}"
+
+  # --- where are we now (absolute worktree root) ----------------------------
+  local here=""
+  here=$(git rev-parse --show-toplevel 2>/dev/null)
+
+  # --- gather worktrees (fills wt_paths / wt_labels; see the note above) ----
+  # shellcheck disable=SC2034  # filled by _wt_collect via dynamic scope
+  local wt_paths=() wt_labels=()
+  _wt_collect
 
   local count="${#wt_paths[@]}"
   if [ "$count" -eq 0 ]; then
@@ -145,26 +253,7 @@ _wt_main() {
     i=0
     while [ "$i" -lt "$count" ]; do match_idx+=("$i"); i=$((i + 1)); done
   else
-    # a query: match branch labels first, then fall back to paths
-    local q_lc lbl_lc path_lc
-    q_lc=$(printf '%s' "$query" | tr '[:upper:]' '[:lower:]')
-
-    i=0
-    while [ "$i" -lt "$count" ]; do
-      lbl_lc=$(printf '%s' "${wt_labels[$i]}" | tr '[:upper:]' '[:lower:]')
-      case "$lbl_lc" in *"$q_lc"*) match_idx+=("$i") ;; esac
-      i=$((i + 1))
-    done
-
-    if [ "${#match_idx[@]}" -eq 0 ]; then
-      i=0
-      while [ "$i" -lt "$count" ]; do
-        path_lc=$(printf '%s' "${wt_paths[$i]}" | tr '[:upper:]' '[:lower:]')
-        case "$path_lc" in *"$q_lc"*) match_idx+=("$i") ;; esac
-        i=$((i + 1))
-      done
-    fi
-
+    _wt_match "$query"
     case "${#match_idx[@]}" in
       0) printf '%s: no worktree matches: %s\n' "$WT_CMD" "$query" >&2
          return 1 ;;
@@ -175,37 +264,7 @@ _wt_main() {
 
   # --- picker: numbered list of candidates, read a choice -------------------
   if [ "$tgt" -lt 0 ]; then
-    local n=0 idx marker reply
-    while [ "$n" -lt "${#match_idx[@]}" ]; do
-      idx="${match_idx[$n]}"
-      if [ -n "$here" ] && [ "${wt_paths[$idx]}" = "$here" ]; then
-        marker="*"
-      else
-        marker=" "
-      fi
-      if [ "$marker" = "*" ]; then
-        printf '%s%3d) %s %s  %s%s\n' "$C_CUR" "$((n + 1))" "$marker" \
-          "${wt_labels[$idx]}" "${wt_paths[$idx]}" "$C_RST"
-      else
-        printf '%3d) %s %s  %s\n' "$((n + 1))" "$marker" \
-          "${wt_labels[$idx]}" "${wt_paths[$idx]}"
-      fi
-      n=$((n + 1))
-    done
-
-    printf 'worktree #? '
-    IFS= read -r reply
-
-    case "$reply" in
-      ''|*[!0-9]*)
-        printf '%s: invalid selection\n' "$WT_CMD" >&2
-        return 1 ;;
-    esac
-    if [ "$reply" -lt 1 ] || [ "$reply" -gt "${#match_idx[@]}" ]; then
-      printf '%s: selection out of range\n' "$WT_CMD" >&2
-      return 1
-    fi
-    tgt="${match_idx[$((reply - 1))]}"
+    _wt_pick "$here" || return 1
   fi
 
   # --- go ---------------------------------------------------------------------
