@@ -231,7 +231,7 @@ _wt_pick() {
     n=$((n + 1))
   done
 
-  printf 'worktree #? or name: '
+  printf 'pick › '
   IFS= read -r reply
 
   # An empty reply is a deliberate bail-out. A pure number in range picks that

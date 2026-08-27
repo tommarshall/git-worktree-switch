@@ -169,7 +169,7 @@ test_falls_back_to_path_match() {
 
 test_multi_match_shows_picker() {
   menu=$(menu_from "$P_MAIN" feature)
-  rows=$(printf '%s\n' "$menu" | grep -c ')')
+  rows=$(printf '%s\n' "$menu" | grep -cE '^ *[0-9]+\)')
   eq "$rows" "2" "multiple matches show a picker of exactly the 2 matches ('feature')"
 
   at "$P_MAIN"; wt feature <<< "$(rownum_for "$menu" "$P_BETA")"
@@ -179,7 +179,7 @@ test_multi_match_shows_picker() {
 test_no_arg_picker_lists_everything() {
   nb=$(git -C "$BARE" worktree list | grep -vc '(bare)')
   menu=$(menu_from "$P_ALPHA")
-  rows=$(printf '%s\n' "$menu" | grep -c ')')
+  rows=$(printf '%s\n' "$menu" | grep -cE '^ *[0-9]+\)')
   eq    "$rows" "$nb"        "no-arg picker lists all $nb non-bare worktrees"
   has   "$menu" "(detached)" "no-arg picker shows the detached worktree"
   lacks "$menu" "$BARE"      "no-arg picker skips the bare repo"

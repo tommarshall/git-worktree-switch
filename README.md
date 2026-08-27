@@ -58,6 +58,8 @@ Matching is a case-insensitive substring. It checks branch names first,
 then paths. One match jumps straight there. Several matches drop you into the
 numbered picker, filtered to just those matches.
 
+Tab completion completes branch names and worktree folder names.
+
 At the picker prompt you can type a number to pick that row, or type a name to
 match by branch/path — the same matching the command line uses. A name that
 matches one worktree jumps there; several re-show the picker filtered to those;
@@ -72,14 +74,12 @@ git can't run. `wt` notices this and recovers — it steps back to a surviving
 worktree first, then carries on — so you can switch away instead of getting
 stranded. `wt -` also works as an escape hatch in that situation.
 
-Tab completion completes branch names and worktree folder names.
-
 ```
 $ wt
   1) * main        ~/projects/app
   2)   feature-x   ~/projects/app-feature-x
   3)   bugfix-42   ~/projects/app-bugfix-42
-worktree #? 2
+pick › 2
 ~/projects/app-feature-x
 
 $ wt bug
