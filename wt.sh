@@ -354,7 +354,10 @@ _wt_main() {
   done
 
   # --- go ---------------------------------------------------------------------
-  if [ -n "$here" ] && [ "${wt_paths[$tgt]}" = "$here" ]; then
+  # "already there" means standing on the worktree root itself, not merely
+  # inside that worktree — compare against $PWD, not `here` (the root). Picking
+  # the current worktree from a subdirectory should still cd up to its root.
+  if [ "${wt_paths[$tgt]}" = "$PWD" ]; then
     printf '%s: already there\n' "$WT_CMD"
     return 0
   fi

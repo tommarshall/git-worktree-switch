@@ -240,6 +240,27 @@ test_one_worktree_is_a_noop() {
   has "$msg" "only one worktree" "one worktree: prints the no-op message"
 }
 
+# From a subdirectory of the current worktree, picking that same worktree should
+# cd up to its root — not report "already there" and leave you in the subdir.
+# "already there" only applies when you're standing on the root itself.
+test_picks_current_worktree_from_subdir() {
+  mkdir -p "$P_MAIN/sub/deep"
+  at "$P_MAIN/sub/deep"
+  wt "$P_MAIN" > "$ROOT/msg" 2>&1
+  msg=$(cat "$ROOT/msg")
+  eq    "$PWD" "$P_MAIN"      "picking the current worktree from a subdir cds to its root"
+  lacks "$msg" "already there" "picking from a subdir does not say 'already there'"
+}
+
+# Standing on the worktree root and picking it is a genuine no-op.
+test_picks_current_worktree_from_root_is_noop() {
+  at "$P_MAIN"; before="$PWD"
+  wt "$P_MAIN" > "$ROOT/msg" 2>&1
+  msg=$(cat "$ROOT/msg")
+  eq  "$PWD" "$before"       "picking the current worktree from its root does not move"
+  has "$msg" "already there" "picking from the root reports 'already there'"
+}
+
 test_dash_returns_to_previous() {
   at "$P_ALPHA"; wt feature-beta
   eq "$PWD" "$P_BETA" "jump to feature-beta (arming the toggle)"
@@ -288,6 +309,8 @@ test_picker_name_refilters_then_number
 test_picker_out_of_range_number_matches_name
 test_picker_empty_reply_cancels
 test_one_worktree_is_a_noop
+test_picks_current_worktree_from_subdir
+test_picks_current_worktree_from_root_is_noop
 test_dash_returns_to_previous
 test_recovers_from_removed_cwd
 test_rename_via_wt_cmd
