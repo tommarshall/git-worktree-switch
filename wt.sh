@@ -97,12 +97,12 @@ _wt_recover() {
 #   display = label \0 path \0            from `_wt_label` onward
 # `head` is `bare` / `detached` / `branch` — the one field telling them apart.
 #
-# Only `_wt_fill` and `_wt_pick` share state by dynamic scope: they read/write
-# the arrays `wt_paths` / `wt_labels` and the scalars `tgt` / `requery`,
-# declared `local` in `_wt_main` alone. A callee thus writes straight into the
-# conductor's locals — no globals leak into the shell, and nothing crosses a
-# subshell (a `$(...)` capture would swallow the picker's prompt). Holds under
-# the zsh `emulate -L` guard, which localises options, not scope.
+# Only `_wt_fill` and `_wt_pick` share state by dynamic scope: `_wt_fill` fills
+# the arrays `wt_paths` / `wt_labels`, `_wt_pick` reads them and writes the one
+# scalar `pick` (its verdict). All three are `local` in `_wt_main` alone, so a
+# callee writes straight into the conductor's locals — no globals leak, and
+# nothing crosses a subshell (a `$(...)` capture would swallow the picker's
+# prompt). Holds under the zsh `emulate -L` guard, which localises options.
 #
 # Print one raw record per worktree, bare repo included, straight from
 # `git worktree list --porcelain -z`.
@@ -265,12 +265,12 @@ _wt_render() {
 }
 
 #
-# Show the candidate menu, read a choice, and set `tgt` (caller's local) to the
-# chosen row's index. The effectful half of the picker: it decides colour from
-# the tty, feeds the conductor's filled `wt_paths` / `wt_labels` to `_wt_render`,
-# then reads and interprets the reply — it must run in the user's shell so the
-# eventual `cd` lands there. $1 = current path. Returns 1 on an invalid reply,
-# 2 on a re-query.
+# Show the candidate menu, read a choice, and set `pick` (the conductor's local)
+# to one verdict: "" = nothing selected, `row:<index>` = that row (0-based),
+# `query:<text>` = re-match by name/path. The effectful half of the picker:
+# decides colour from the tty, feeds `wt_paths` / `wt_labels` to `_wt_render`,
+# then reads and classifies the reply — it runs in the user's shell so the `cd`
+# lands there. $1 = current path. Always returns 0; the verdict is in `pick`.
 #
 _wt_pick() {
   [ -n "${ZSH_VERSION:-}" ] && emulate -L zsh 2>/dev/null && \
@@ -302,23 +302,24 @@ _wt_pick() {
   printf 'pick › '
   IFS= read -r reply
 
-  # An empty reply is a deliberate bail-out. A pure number in range picks that
-  # row. ANYTHING else — a name, or a number that isn't a row — is handed back
-  # to the conductor as a fresh query (requery) to re-match by name/path, so a
-  # branch literally named `1234` still resolves.
+  # Classify the reply into `pick`: empty = bail; a pure number in range =
+  # `row:<index>`; anything else = `query:<text>`, so a branch named `1234` still
+  # resolves. The conductor strips the tag once, so a query with a `:` survives.
+  # shellcheck disable=SC2034  # pick is the conductor's local (dynamic scope)
   if [ -z "$reply" ]; then
     printf '%s: nothing selected\n' "$WT_CMD" >&2
-    return 1
+    pick=""
+    return 0
   fi
   case "$reply" in
-    *[!0-9]*) : ;;  # not a pure number -> requery below
+    *[!0-9]*) : ;;  # not a pure number -> a query below
     *) if [ "$reply" -ge 1 ] && [ "$reply" -le "$count" ]; then
-         tgt=$((reply - 1))
+         pick="row:$((reply - 1))"
          return 0
        fi ;;
   esac
-  requery="$reply"
-  return 2
+  pick="query:$reply"
+  return 0
 }
 
 #
@@ -368,8 +369,8 @@ _wt_main() {
   fi
 
   # --- decide the target, or the set of candidates to pick from -------------
-  # shellcheck disable=SC2034  # wt_paths/wt_labels filled by _wt_fill (dynamic scope)
-  local wt_paths=() wt_labels=() tgt=-1 requery="" rc=0
+  # shellcheck disable=SC2034  # wt_paths/wt_labels filled by _wt_fill; pick set by _wt_pick (dynamic scope)
+  local wt_paths=() wt_labels=() chosen=-1 pick=""
 
   _wt_fill "$query"
   local count="${#wt_paths[@]}"
@@ -396,39 +397,39 @@ _wt_main() {
     fi
   else
     # exactly one match jumps; several fall through to the picker
-    [ "$count" -eq 1 ] && tgt=0
+    [ "$count" -eq 1 ] && chosen=0
   fi
 
   # --- picker: numbered list of candidates, read a choice -------------------
-  # Loop so a typed name (or an out-of-range number) re-matches against ALL
-  # worktrees, reusing the same pipeline the CLI does. A pick (rc 0) sets `tgt`
-  # and ends the loop; a re-query (rc 2) refills the candidates; an empty reply
-  # (rc 1) bails.
-  while [ "$tgt" -lt 0 ]; do
+  # Loop so a typed name (or out-of-range number) re-matches against ALL
+  # worktrees via the same pipeline the CLI uses. Dispatch the picker's `pick`
+  # verdict: `row:` picks and ends the loop; `query:` refills the candidates; ""
+  # bails (the picker already said why).
+  while [ "$chosen" -lt 0 ]; do
     _wt_pick "$here"
-    rc=$?
-    if [ "$rc" -eq 2 ]; then
-      _wt_fill "$requery"
-      case "${#wt_paths[@]}" in
-        0) printf '%s: no worktree matches: %s\n' "$WT_CMD" "$requery" >&2
-           return 1 ;;
-        1) tgt=0 ;;
-        *) : ;;  # several matches -> loop, picker reshows the filtered set
-      esac
-    elif [ "$rc" -ne 0 ]; then
-      return 1
-    fi
+    case "$pick" in
+      "")    return 1 ;;
+      row:*) chosen="${pick#row:}" ;;
+      query:*)
+        _wt_fill "${pick#query:}"
+        case "${#wt_paths[@]}" in
+          0) printf '%s: no worktree matches: %s\n' "$WT_CMD" "${pick#query:}" >&2
+             return 1 ;;
+          1) chosen=0 ;;
+          *) : ;;  # several matches -> loop, picker reshows the filtered set
+        esac ;;
+    esac
   done
 
   # --- go ---------------------------------------------------------------------
   # "already there" means standing on the worktree root itself, not merely
   # inside that worktree — compare against $PWD, not `here` (the root). Picking
   # the current worktree from a subdirectory should still cd up to its root.
-  if [ "${wt_paths[$tgt]}" = "$PWD" ]; then
+  if [ "${wt_paths[$chosen]}" = "$PWD" ]; then
     printf '%s: already there\n' "$WT_CMD"
     return 0
   fi
-  _wt_cd "${wt_paths[$tgt]}" "$here"
+  _wt_cd "${wt_paths[$chosen]}" "$here"
 }
 
 #
