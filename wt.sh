@@ -12,7 +12,7 @@
 #   source /path/to/wt.sh
 #
 # Usage:
-#   wt            list worktrees, pick one by number
+#   wt            list worktrees, pick one by number (or type a name to match)
 #   wt <query>    jump to the worktree matching <query> (branch, then path;
 #                 case-insensitive substring). One match jumps; several filter.
 #   wt -          jump back to the previous worktree (like `cd -`)
@@ -51,7 +51,7 @@ _wt_cd() {
 # How the internal functions share state
 # --------------------------------------------------------------------------
 # _wt_collect / _wt_match / _wt_pick fill or read the arrays `wt_paths`,
-# `wt_labels`, `match_idx` and the scalar `tgt`. Those names are declared
+# `wt_labels`, `match_idx` and the scalars `tgt` and `requery`. Those names are declared
 # `local` in the conductor (`_wt_main`) ONLY; the callees assign to them
 # without re-declaring. Both bash and zsh use dynamic scope, so a callee
 # writes straight into the conductor's locals — no globals leak into the
@@ -196,19 +196,26 @@ _wt_pick() {
     n=$((n + 1))
   done
 
-  printf 'worktree #? '
+  printf 'worktree #? or name: '
   IFS= read -r reply
 
-  case "$reply" in
-    ''|*[!0-9]*)
-      printf '%s: invalid selection\n' "$WT_CMD" >&2
-      return 1 ;;
-  esac
-  if [ "$reply" -lt 1 ] || [ "$reply" -gt "${#match_idx[@]}" ]; then
-    printf '%s: selection out of range\n' "$WT_CMD" >&2
+  # An empty reply is a deliberate bail-out. A pure number in range picks that
+  # row. ANYTHING else — a name, or a number that isn't a row — is handed back
+  # to the conductor as a fresh query (requery) to re-match by name/path, so a
+  # branch literally named `1234` still resolves. Pure builtins here: no `tr`.
+  if [ -z "$reply" ]; then
+    printf '%s: invalid selection\n' "$WT_CMD" >&2
     return 1
   fi
-  tgt="${match_idx[$((reply - 1))]}"
+  case "$reply" in
+    *[!0-9]*) : ;;  # not a pure number -> requery below
+    *) if [ "$reply" -ge 1 ] && [ "$reply" -le "${#match_idx[@]}" ]; then
+         tgt="${match_idx[$((reply - 1))]}"
+         return 0
+       fi ;;
+  esac
+  requery="$reply"
+  return 2
 }
 
 #
@@ -252,7 +259,7 @@ _wt_main() {
   fi
 
   # --- decide the target, or the set of candidates to pick from -------------
-  local match_idx=() tgt=-1 i=0
+  local match_idx=() tgt=-1 i=0 requery="" rc=0
 
   if [ -z "$query" ]; then
     # no arg: candidates are every worktree
@@ -273,9 +280,26 @@ _wt_main() {
   fi
 
   # --- picker: numbered list of candidates, read a choice -------------------
-  if [ "$tgt" -lt 0 ]; then
-    _wt_pick "$here" || return 1
-  fi
+  # Loop so a typed name (or an out-of-range number) re-matches against ALL
+  # worktrees, reusing `_wt_match` — the same matching the CLI does. A pick
+  # (rc 0) sets `tgt` and ends the loop; a re-query (rc 2) refills the
+  # candidates; an empty reply (rc 1) bails.
+  while [ "$tgt" -lt 0 ]; do
+    _wt_pick "$here"
+    rc=$?
+    if [ "$rc" -eq 2 ]; then
+      match_idx=()
+      _wt_match "$requery"
+      case "${#match_idx[@]}" in
+        0) printf '%s: no worktree matches: %s\n' "$WT_CMD" "$requery" >&2
+           return 1 ;;
+        1) tgt="${match_idx[0]}" ;;
+        *) : ;;  # several matches -> loop, picker reshows the filtered set
+      esac
+    elif [ "$rc" -ne 0 ]; then
+      return 1
+    fi
+  done
 
   # --- go ---------------------------------------------------------------------
   if [ -n "$here" ] && [ "${wt_paths[$tgt]}" = "$here" ]; then

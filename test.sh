@@ -182,6 +182,39 @@ test_picker_columns_align() {
   eq "$widths" "1" "no-arg picker aligns every path into one column"
 }
 
+test_picker_name_jumps() {
+  # At the no-arg picker, typing a name that matches exactly one worktree
+  # jumps there — reusing the CLI's branch/path matching.
+  at "$P_MAIN"; wt <<< "alpha"
+  eq "$PWD" "$P_ALPHA" "picker: a name matching one worktree jumps there ('alpha')"
+}
+
+test_picker_name_refilters_then_number() {
+  # A name matching several re-shows the picker filtered to those; a follow-up
+  # number then picks from the filtered set. Two lines feed the two reads.
+  menu=$(menu_from "$P_MAIN" feature)
+  at "$P_MAIN"; wt <<< "$(printf 'feature\n%s\n' "$(rownum_for "$menu" "$P_BETA")")"
+  eq "$PWD" "$P_BETA" "picker: a name matching several re-filters, then a number picks"
+}
+
+test_picker_out_of_range_number_matches_name() {
+  # An out-of-range number is not a row, so it falls through to name/path
+  # matching rather than dead-ending. 'quxpath' contains no digits, so match a
+  # branch/path substring that a stray number can't hit; here we just assert
+  # the fallthrough path reports no match cleanly for a non-matching number.
+  at "$P_MAIN"; wt <<< "999" > "$ROOT/msg" 2>&1 || true
+  msg=$(cat "$ROOT/msg")
+  has "$msg" "no worktree matches: 999" "picker: an out-of-range number falls through to matching"
+}
+
+test_picker_empty_reply_cancels() {
+  at "$P_MAIN"; before="$PWD"
+  wt <<< "" > "$ROOT/msg" 2>&1 || true
+  msg=$(cat "$ROOT/msg")
+  eq  "$PWD" "$before"          "picker: empty reply does not move"
+  has "$msg" "invalid selection" "picker: empty reply reports invalid selection"
+}
+
 test_one_worktree_is_a_noop() {
   at "$SOLO"; before="$PWD"
   wt > "$ROOT/msg" 2>&1
@@ -208,6 +241,10 @@ test_falls_back_to_path_match
 test_multi_match_shows_picker
 test_no_arg_picker_lists_everything
 test_picker_columns_align
+test_picker_name_jumps
+test_picker_name_refilters_then_number
+test_picker_out_of_range_number_matches_name
+test_picker_empty_reply_cancels
 test_one_worktree_is_a_noop
 test_dash_returns_to_previous
 

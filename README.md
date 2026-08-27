@@ -58,6 +58,11 @@ Matching is a case-insensitive substring. It checks branch names first,
 then paths. One match jumps straight there. Several matches drop you into the
 numbered picker, filtered to just those matches.
 
+At the picker prompt you can type a number to pick that row, or type a name to
+match by branch/path — the same matching the command line uses. A name that
+matches one worktree jumps there; several re-show the picker filtered to those;
+none reports no match. An empty reply cancels.
+
 The current worktree is marked with `*`. A detached HEAD shows as `(detached)`;
 the bare repo, if any, is skipped.
 
