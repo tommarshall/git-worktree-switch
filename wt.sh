@@ -85,27 +85,24 @@ _wt_recover() {
 #
 # The records pipeline
 # --------------------------------------------------------------------------
-# A *record* is one worktree as it moves down the pipe. `_wt_records` runs git
-# once and prints raw records; `_wt_label` turns those into display records;
-# `_wt_match` keeps the ones a query hits. All three are pure stdin→stdout
-# filters — they touch no shell state, so they can be tested by feeding records
-# in and asserting the records that come out, with no git and no fixture.
+# A *record* is one worktree moving down the pipe:
+#   _wt_records → _wt_label → _wt_match → _wt_render
+# runs git once, labels, filters by query, then draws the menu. All four are
+# pure stdin→stdout filters — no shell state — so each is testable by piping
+# records in and checking what comes out, with no git and no fixture.
 #
-# Records are NUL-framed so a worktree path (which may contain a newline — the
-# reason git offers `-z`) survives intact. Fixed arity, no record separator:
-#   raw     record = head \0 branch \0 path \0   (`_wt_records` → `_wt_label`)
-#   display record = label \0 path \0            (`_wt_label`  → `_wt_match`)
-# `head` is one of `bare` / `detached` / `branch`, the only field that tells the
-# three cases apart.
+# Records are NUL-framed, fixed arity, no separator, so a worktree path (which
+# may contain a newline — why git offers `-z`) survives intact:
+#   raw     = head \0 branch \0 path \0   from `_wt_records`
+#   display = label \0 path \0            from `_wt_label` onward
+# `head` is `bare` / `detached` / `branch` — the one field telling them apart.
 #
-# Only the conductor's own glue (`_wt_fill`) and the picker (`_wt_pick`) still
-# share state by dynamic scope: they read/write the arrays `wt_paths` /
-# `wt_labels` and the scalars `tgt` / `requery`, declared `local` in `_wt_main`
-# ONLY. Dynamic scope means a callee writes straight into the conductor's
-# locals, so no globals leak into the interactive shell and nothing is
-# serialised across a subshell (a `$(...)` capture would swallow the picker's
-# prompt). This holds under the zsh `emulate -L` guard, which localises options,
-# not variable scope.
+# Only `_wt_fill` and `_wt_pick` share state by dynamic scope: they read/write
+# the arrays `wt_paths` / `wt_labels` and the scalars `tgt` / `requery`,
+# declared `local` in `_wt_main` alone. A callee thus writes straight into the
+# conductor's locals — no globals leak into the shell, and nothing crosses a
+# subshell (a `$(...)` capture would swallow the picker's prompt). Holds under
+# the zsh `emulate -L` guard, which localises options, not scope.
 #
 # Print one raw record per worktree, bare repo included, straight from
 # `git worktree list --porcelain -z`.
@@ -221,10 +218,59 @@ _wt_fill() {
 }
 
 #
-# Print the numbered candidate list (marker + colour) straight from the filled
-# `wt_paths` / `wt_labels` (caller's locals), read a choice, and set `tgt`
-# (caller's local) to the chosen row's index. $1 = current path (for the `*`
-# marker). Returns 1 on an invalid reply, 2 on a re-query.
+# Render the numbered, aligned candidate menu from display records on stdin —
+# the same `label \0 path \0` records the pipeline produces. A pure filter like
+# the rest: records in, menu text out, no shell state and no tty, so the column
+# alignment and current-row marker can be asserted without driving `wt`.
+# $1 = current path (its row gets the `*` marker); $2 = `1` to colour that row.
+#
+_wt_render() {
+  [ -n "${ZSH_VERSION:-}" ] && emulate -L zsh 2>/dev/null && \
+    setopt ksh_arrays sh_word_split no_nomatch
+
+  local here="$1" color="${2:-0}"
+  local C_CUR="" C_RST=""
+  [ "$color" = "1" ] && { C_CUR=$'\033[1;32m'; C_RST=$'\033[0m'; }
+
+  local labels=() paths=() label wtpath
+  while IFS= read -r -d '' label && IFS= read -r -d '' wtpath; do
+    labels+=("$label"); paths+=("$wtpath")
+  done
+
+  # widest branch label among the candidates, so every path lines up in a column
+  local count="${#labels[@]}" n=0 label_w=0 len
+  while [ "$n" -lt "$count" ]; do
+    len=${#labels[$n]}
+    [ "$len" -gt "$label_w" ] && label_w="$len"
+    n=$((n + 1))
+  done
+
+  local marker
+  n=0
+  while [ "$n" -lt "$count" ]; do
+    if [ -n "$here" ] && [ "${paths[$n]}" = "$here" ]; then
+      marker="*"
+    else
+      marker=" "
+    fi
+    if [ "$marker" = "*" ]; then
+      printf '%s%3d) %s %-*s  %s%s\n' "$C_CUR" "$((n + 1))" "$marker" \
+        "$label_w" "${labels[$n]}" "${paths[$n]}" "$C_RST"
+    else
+      printf '%3d) %s %-*s  %s\n' "$((n + 1))" "$marker" \
+        "$label_w" "${labels[$n]}" "${paths[$n]}"
+    fi
+    n=$((n + 1))
+  done
+}
+
+#
+# Show the candidate menu, read a choice, and set `tgt` (caller's local) to the
+# chosen row's index. The effectful half of the picker: it decides colour from
+# the tty, feeds the conductor's filled `wt_paths` / `wt_labels` to `_wt_render`,
+# then reads and interprets the reply — it must run in the user's shell so the
+# eventual `cd` lands there. $1 = current path. Returns 1 on an invalid reply,
+# 2 on a re-query.
 #
 _wt_pick() {
   [ -n "${ZSH_VERSION:-}" ] && emulate -L zsh 2>/dev/null && \
@@ -233,42 +279,25 @@ _wt_pick() {
   local here="$1"
 
   # --- colour: only on a tty, and only if git config doesn't forbid it ------
-  local C_CUR="" C_RST=""
+  local color=0
   if [ -t 1 ]; then
     local ui
     ui=$(git config --get color.ui 2>/dev/null)
     case "$ui" in
       never|false|off|no) : ;;
-      *) C_CUR=$'\033[1;32m'; C_RST=$'\033[0m' ;;
+      *) color=1 ;;
     esac
   fi
 
   # shellcheck disable=SC2154  # wt_paths/wt_labels are the conductor's locals
-  # widest branch label among the candidates, so every path lines up in a column
-  local count="${#wt_paths[@]}" n=0 label_w=0 len
-  while [ "$n" -lt "$count" ]; do
-    len=${#wt_labels[$n]}
-    [ "$len" -gt "$label_w" ] && label_w="$len"
-    n=$((n + 1))
-  done
-
-  local marker reply
-  n=0
-  while [ "$n" -lt "$count" ]; do
-    if [ -n "$here" ] && [ "${wt_paths[$n]}" = "$here" ]; then
-      marker="*"
-    else
-      marker=" "
-    fi
-    if [ "$marker" = "*" ]; then
-      printf '%s%3d) %s %-*s  %s%s\n' "$C_CUR" "$((n + 1))" "$marker" \
-        "$label_w" "${wt_labels[$n]}" "${wt_paths[$n]}" "$C_RST"
-    else
-      printf '%3d) %s %-*s  %s\n' "$((n + 1))" "$marker" \
-        "$label_w" "${wt_labels[$n]}" "${wt_paths[$n]}"
-    fi
-    n=$((n + 1))
-  done
+  local count="${#wt_paths[@]}" n=0 reply
+  # serialise the filled arrays back into records for the pure renderer
+  {
+    while [ "$n" -lt "$count" ]; do
+      printf '%s\0%s\0' "${wt_labels[$n]}" "${wt_paths[$n]}"
+      n=$((n + 1))
+    done
+  } | _wt_render "$here" "$color"
 
   printf 'pick › '
   IFS= read -r reply
@@ -420,7 +449,7 @@ _wt() {
   fi
 
   # Same record source the switcher uses. Offer every branch name and every
-  # worktree folder basename — bare repo included, as before.
+  # worktree folder basename, bare repo included.
   while IFS= read -r -d '' head && IFS= read -r -d '' branch \
         && IFS= read -r -d '' wtpath; do
     [ -n "$branch" ] && candidates="$candidates $branch"

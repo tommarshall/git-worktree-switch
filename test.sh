@@ -217,6 +217,46 @@ test_match_empty_query_passes_all() {
   eq "$got" "main|/p/m|dev|/p/d|" "_wt_match: an empty query passes every record through"
 }
 
+test_render_aligns_paths() {
+  # Labels of differing widths must still leave every path in one column — the
+  # menu's output on stdin records, no fixture. Count distinct "text before the
+  # first /" widths; alignment means exactly one.
+  menu=$(nul short /p/a longbranchname /p/b | _wt_render "" 0)
+  widths=$(printf '%s\n' "$menu" | grep '/' | while IFS= read -r line; do
+    prefix="${line%%/*}"
+    printf '%s\n' "${#prefix}"
+  done | sort -u | grep -c .)
+  eq "$widths" "1" "_wt_render: labels of differing widths still align every path"
+}
+
+test_render_marks_the_current_row() {
+  # The marker is a literal `*`, a glob metacharacter — so match it with
+  # `grep -F` (fixed string), never the case-glob `has`/`lacks`, where `*`
+  # would match anything and prove nothing. Marked rows carry `) *`; unmarked
+  # rows have a space there instead, so they never do.
+  menu=$(nul main /p/main dev /p/dev | _wt_render /p/dev 0)
+  if printf '%s\n' "$menu" | grep -F /p/dev | grep -qF ') *'; then
+    ok "_wt_render: the current worktree's row is marked with *"
+  else
+    bad "_wt_render: the current worktree's row is marked with *"
+  fi
+  if printf '%s\n' "$menu" | grep -F /p/main | grep -qF ') *'; then
+    bad "_wt_render: other rows carry no marker"
+  else
+    ok "_wt_render: other rows carry no marker"
+  fi
+}
+
+test_render_colour_is_off_by_default() {
+  menu=$(nul main /p/main | _wt_render /p/main 0)
+  lacks "$menu" "[1;32m" "_wt_render: colour flag 0 emits no ANSI escapes"
+}
+
+test_render_colour_wraps_current_row() {
+  menu=$(nul main /p/main | _wt_render /p/main 1)
+  has "$menu" "[1;32m" "_wt_render: colour flag 1 wraps the current row in ANSI"
+}
+
 # --------------------------------------------------------------------------
 # Tests (one behaviour each; the run list at the bottom reads as a checklist)
 # --------------------------------------------------------------------------
@@ -250,17 +290,6 @@ test_no_arg_picker_lists_everything() {
 
   at "$P_ALPHA"; wt <<< "$(rownum_for "$menu" "$P_BETA")"
   eq "$PWD" "$P_BETA" "picking feature-beta's row from the no-arg picker jumps there"
-}
-
-test_picker_columns_align() {
-  # Labels differ in width (sidebranch, feature-alpha, (detached), main), so
-  # this only passes if the label column is padded and every path lines up.
-  menu=$(menu_from "$P_ALPHA")
-  widths=$(printf '%s\n' "$menu" | grep '/' | while IFS= read -r line; do
-    prefix="${line%%/*}"   # everything before the path's leading '/'
-    printf '%s\n' "${#prefix}"
-  done | sort -u | grep -c .)
-  eq "$widths" "1" "no-arg picker aligns every path into one column"
 }
 
 test_picker_name_jumps() {
@@ -305,8 +334,8 @@ test_query_no_match_blames_query() {
 }
 
 # The same query, but from outside any repo, blames the missing repo — not the
-# query. This is the case the records pipeline could regress: an empty result
-# no longer means "no worktrees", so the repo has to be probed directly.
+# query. An empty candidate set doesn't distinguish "no worktrees" from "no
+# match", so the repo is probed directly to tell the two apart.
 test_query_outside_repo_reports_no_repo() {
   mkdir -p "$ROOT/norepo"
   at "$ROOT/norepo"
@@ -394,12 +423,15 @@ test_default_command_name_is_wt() {
   test_match_is_case_insensitive
   test_match_reports_nothing_on_no_match
   test_match_empty_query_passes_all
+  test_render_aligns_paths
+  test_render_marks_the_current_row
+  test_render_colour_is_off_by_default
+  test_render_colour_wraps_current_row
 
   test_single_match_is_branch_first
   test_falls_back_to_path_match
   test_multi_match_shows_picker
   test_no_arg_picker_lists_everything
-  test_picker_columns_align
   test_picker_name_jumps
   test_picker_name_refilters_then_number
   test_picker_out_of_range_number_matches_name
