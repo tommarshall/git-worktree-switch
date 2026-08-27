@@ -1,5 +1,7 @@
 # git-worktree-switch
 
+[![CI](https://github.com/tommarshall/git-worktree-switch/actions/workflows/ci.yml/badge.svg)](https://github.com/tommarshall/git-worktree-switch/actions/workflows/ci.yml)
+
 Switch between git worktrees.
 
 `wt` is a tiny shell function that lists your git worktrees, matches one by
