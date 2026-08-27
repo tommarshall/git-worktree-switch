@@ -65,6 +65,16 @@ lacks() { # haystack needle name
 # Move to a worktree before exercising `wt`; a failure here is a test failure.
 at() { cd "$1" || bad "cannot cd into $1"; }
 
+# Emit each argument as a NUL-terminated field — the on-the-wire form of the
+# records pipeline. A record is just its fields in order, so `nul a b c` is one
+# three-field record and `nul a b c d e f` is two. Kept out of a shell variable
+# deliberately: variables can't hold NUL, so records only ever flow down a pipe.
+nul() { printf '%s\0' "$@"; }
+
+# Run a records filter and render its NUL-framed output with NULs shown as `|`,
+# so a whole record stream compares as one plain string (trailing `|` and all).
+piped() { "$@" | tr '\0' '|'; }
+
 # Given captured picker output and a worktree path, return the menu number
 # printed beside that path. Lets the picker tests select by identity rather
 # than by a hard-coded, order-dependent index.
@@ -155,17 +165,65 @@ build_fixture() {
 }
 
 # --------------------------------------------------------------------------
+# Unit tests for the pure filters — records in, records out, no git, no
+# fixture. This is what the records seam buys: matching and labelling can be
+# asserted directly, without a bare clone and five worktrees.
+# --------------------------------------------------------------------------
+
+test_label_uses_branch_when_present() {
+  got=$(nul branch main /p/main | piped _wt_label)
+  eq "$got" "main|/p/main|" "_wt_label: a branch record is labelled with its branch"
+}
+
+test_label_names_detached() {
+  got=$(nul detached "" /p/det | piped _wt_label)
+  eq "$got" "(detached)|/p/det|" "_wt_label: a detached record is labelled (detached)"
+}
+
+test_label_names_unknown() {
+  got=$(nul branch "" /p/unk | piped _wt_label)
+  eq "$got" "(unknown)|/p/unk|" "_wt_label: a branchless non-detached record is (unknown)"
+}
+
+test_label_drops_bare() {
+  got=$(nul bare "" /p/repo.git | piped _wt_label)
+  eq "$got" "" "_wt_label: the bare repo is dropped, emitting nothing"
+}
+
+test_match_labels_before_paths() {
+  # 'main' hits a label; the path-only record must not come through.
+  got=$(nul main /p/x feature /home/main-app | piped _wt_match main)
+  eq "$got" "main|/p/x|" "_wt_match: a label hit wins; paths are not consulted"
+}
+
+test_match_falls_back_to_path() {
+  # 'app' hits no label, so the path pass runs and both path hits come through.
+  got=$(nul main /home/app dev /home/apple | piped _wt_match app)
+  eq "$got" "main|/home/app|dev|/home/apple|" "_wt_match: no label hit falls back to path matches"
+}
+
+test_match_is_case_insensitive() {
+  got=$(nul Feature-Beta /p/b | piped _wt_match BETA)
+  eq "$got" "Feature-Beta|/p/b|" "_wt_match: matching is case-insensitive"
+}
+
+test_match_reports_nothing_on_no_match() {
+  got=$(nul main /p/m dev /p/d | piped _wt_match zzz)
+  eq "$got" "" "_wt_match: no label or path hit emits nothing"
+}
+
+test_match_empty_query_passes_all() {
+  got=$(nul main /p/m dev /p/d | piped _wt_match "")
+  eq "$got" "main|/p/m|dev|/p/d|" "_wt_match: an empty query passes every record through"
+}
+
+# --------------------------------------------------------------------------
 # Tests (one behaviour each; the run list at the bottom reads as a checklist)
 # --------------------------------------------------------------------------
 
 test_single_match_is_branch_first() {
   at "$P_MAIN"; wt alpha
   eq "$PWD" "$P_ALPHA" "single-match query auto-jumps, matching branch first ('alpha')"
-}
-
-test_matching_is_case_insensitive() {
-  at "$P_MAIN"; wt ALPHA
-  eq "$PWD" "$P_ALPHA" "matching is case-insensitive ('ALPHA')"
 }
 
 test_falls_back_to_path_match() {
@@ -238,6 +296,25 @@ test_picker_empty_reply_cancels() {
   has "$msg" "nothing selected" "picker: empty reply reports nothing selected"
 }
 
+# A query that matches nothing, but from inside a real repo, blames the query.
+test_query_no_match_blames_query() {
+  at "$P_MAIN"
+  wt zzz-no-such > "$ROOT/msg" 2>&1 || true
+  msg=$(cat "$ROOT/msg")
+  has "$msg" "no worktree matches: zzz-no-such" "a non-matching query in a repo reports no match"
+}
+
+# The same query, but from outside any repo, blames the missing repo — not the
+# query. This is the case the records pipeline could regress: an empty result
+# no longer means "no worktrees", so the repo has to be probed directly.
+test_query_outside_repo_reports_no_repo() {
+  mkdir -p "$ROOT/norepo"
+  at "$ROOT/norepo"
+  wt zzz-no-such > "$ROOT/msg" 2>&1 || true
+  msg=$(cat "$ROOT/msg")
+  has "$msg" "not in a git repository" "a query outside any repo reports 'not in a git repository'"
+}
+
 test_one_worktree_is_a_noop() {
   at "$SOLO"; before="$PWD"
   wt > "$ROOT/msg" 2>&1
@@ -307,8 +384,18 @@ test_default_command_name_is_wt() {
 {
   build_fixture
 
+  # pure filters — no git needed, but build_fixture already sourced wt.sh
+  test_label_uses_branch_when_present
+  test_label_names_detached
+  test_label_names_unknown
+  test_label_drops_bare
+  test_match_labels_before_paths
+  test_match_falls_back_to_path
+  test_match_is_case_insensitive
+  test_match_reports_nothing_on_no_match
+  test_match_empty_query_passes_all
+
   test_single_match_is_branch_first
-  test_matching_is_case_insensitive
   test_falls_back_to_path_match
   test_multi_match_shows_picker
   test_no_arg_picker_lists_everything
@@ -317,6 +404,8 @@ test_default_command_name_is_wt() {
   test_picker_name_refilters_then_number
   test_picker_out_of_range_number_matches_name
   test_picker_empty_reply_cancels
+  test_query_no_match_blames_query
+  test_query_outside_repo_reports_no_repo
   test_one_worktree_is_a_noop
   test_picks_current_worktree_from_subdir
   test_picks_current_worktree_from_root_is_noop

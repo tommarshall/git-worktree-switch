@@ -21,9 +21,16 @@ Both must be green. `lint` is shellcheck; `test` is `test.sh`.
   guard. No `mapfile`, no bash-4-isms.
 - **Sourced, not executed.** State (`WT_LAST`) lives in the user's shell. Don't
   wrap the switch in a subshell — a `$(...)` capture eats the picker prompt.
-- **Dynamic-scope contract.** `_wt_collect` / `_wt_match` / `_wt_pick` write
-  into arrays declared `local` in `_wt_main` only. Keep that shape; don't add
-  globals and don't re-`local` those names in the callees.
+- **Records are pure filters.** `_wt_records` / `_wt_label` / `_wt_match` are
+  stdin→stdout filters that touch no shell state — that's what makes them
+  testable without git. Keep them that way: no writing into the conductor's
+  variables, and NUL-frame every field (a worktree path may contain a newline).
+- **Dynamic-scope contract.** Only the conductor's glue `_wt_fill` and the
+  picker `_wt_pick` share state by dynamic scope — they read/write the arrays
+  `wt_paths` / `wt_labels` and the scalars `tgt` / `requery`, declared `local`
+  in `_wt_main` only. Keep that shape; don't add globals and don't re-`local`
+  those names in the callees. It survives because the picker must prompt and
+  `cd` in the user's shell, so its output can't be captured through `$(...)`.
 - **Rename via `WT_CMD`.** One variable at the top drives the command name, its
   completion, and every message. Never hardcode `wt`. Its default is set with
   `${WT_CMD:-wt}` so a value exported before sourcing wins — keep that form so
