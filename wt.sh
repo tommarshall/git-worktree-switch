@@ -440,7 +440,7 @@ _wt() {
   [ -n "${ZSH_VERSION:-}" ] && emulate -L zsh 2>/dev/null && \
     setopt ksh_arrays sh_word_split no_nomatch
 
-  local cur candidates="" head branch wtpath
+  local cur candidates="" label wtpath
   cur="${COMP_WORDS[COMP_CWORD]}"
 
   # only complete the first word after the command
@@ -449,13 +449,16 @@ _wt() {
     return 0
   fi
 
-  # Same record source the switcher uses. Offer every branch name and every
-  # worktree folder basename, bare repo included.
-  while IFS= read -r -d '' head && IFS= read -r -d '' branch \
-        && IFS= read -r -d '' wtpath; do
-    [ -n "$branch" ] && candidates="$candidates $branch"
+  # Label through `_wt_label` so how a Label is formed lives in ONE place
+  # (branch, else `(detached)` / `(unknown)`), with the bare repo already
+  # dropped. Offer each Label and its worktree folder basename.
+  # ACCEPTED LIMIT: `compgen -W` word-splits on IFS, so a Label or path with
+  # whitespace won't survive. NUL-safe completion needs bash 4's `readarray -d`,
+  # but this runs in bash 3.2 — keep the space-join.
+  while IFS= read -r -d '' label && IFS= read -r -d '' wtpath; do
+    [ -n "$label" ]  && candidates="$candidates $label"
     [ -n "$wtpath" ] && candidates="$candidates ${wtpath##*/}"
-  done < <(_wt_records)
+  done < <(_wt_records | _wt_label)
 
   # SC2207: word-splitting is the intended completion idiom; mapfile is absent in bash 3.2.
   # shellcheck disable=SC2207

@@ -405,6 +405,21 @@ test_default_command_name_is_wt() {
   eq "$got" "$P_BETA" "with WT_CMD unset the command defaults to 'wt'"
 }
 
+# Completion draws its Labels from _wt_label, so it names the detached worktree
+# and drops the bare repo. The suite's one brush with arrays: bash's completion
+# contract passes words in COMP_WORDS, and _wt must run in this shell (not a
+# subshell) so the COMPREPLY it sets is ours to read. Empty current word => all.
+test_completion_labels_come_from_wt_label() {
+  at "$P_MAIN"
+  COMP_WORDS=(wt ""); COMP_CWORD=1
+  _wt
+  menu=$(printf '%s\n' "${COMPREPLY[@]}")
+  has   "$menu" "feature-alpha" "completion: offers branch Labels"
+  has   "$menu" "(detached)"    "completion: offers the (detached) Label via _wt_label"
+  lacks "$menu" "repo.git"      "completion: drops the bare repo (never a switch target)"
+  unset COMP_WORDS COMP_CWORD COMPREPLY
+}
+
 # --------------------------------------------------------------------------
 # Run
 # --------------------------------------------------------------------------
@@ -445,6 +460,7 @@ test_default_command_name_is_wt() {
   test_recovers_from_removed_cwd
   test_rename_via_wt_cmd
   test_default_command_name_is_wt
+  test_completion_labels_come_from_wt_label
 } >/dev/null 2>&1
 
 printf '\n%s under %s: %d passed, %d failed\n' \
