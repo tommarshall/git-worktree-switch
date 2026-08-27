@@ -39,8 +39,14 @@ WT_SH="$HERE/wt.sh"
 PASS=0
 FAIL=0
 
-ok()  { PASS=$((PASS + 1)); printf '  ok   - %s\n' "$1"; }
-bad() { FAIL=$((FAIL + 1)); printf '  FAIL - %s\n' "$1"; }
+# fd 3 is our report channel. The run block below points stdout/stderr at
+# /dev/null so the function-under-test's own chatter (destinations it cd's to,
+# picker menus, the "pick ›" prompt) stays out of the results; ok/bad still
+# reach the terminal by writing to fd 3.
+exec 3>&1
+
+ok()  { PASS=$((PASS + 1)); printf '  ok   - %s\n' "$1" >&3; }
+bad() { FAIL=$((FAIL + 1)); printf '  FAIL - %s\n' "$1" >&3; }
 
 eq() { # got want name
   if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (want [$2] got [$1])"; fi
@@ -296,27 +302,31 @@ test_default_command_name_is_wt() {
 # --------------------------------------------------------------------------
 # Run
 # --------------------------------------------------------------------------
-build_fixture
+# Braces (not a subshell) so build_fixture's globals persist; stdout/stderr go
+# to /dev/null while ok/bad report on fd 3.
+{
+  build_fixture
 
-test_single_match_is_branch_first
-test_matching_is_case_insensitive
-test_falls_back_to_path_match
-test_multi_match_shows_picker
-test_no_arg_picker_lists_everything
-test_picker_columns_align
-test_picker_name_jumps
-test_picker_name_refilters_then_number
-test_picker_out_of_range_number_matches_name
-test_picker_empty_reply_cancels
-test_one_worktree_is_a_noop
-test_picks_current_worktree_from_subdir
-test_picks_current_worktree_from_root_is_noop
-test_dash_returns_to_previous
-test_recovers_from_removed_cwd
-test_rename_via_wt_cmd
-test_default_command_name_is_wt
+  test_single_match_is_branch_first
+  test_matching_is_case_insensitive
+  test_falls_back_to_path_match
+  test_multi_match_shows_picker
+  test_no_arg_picker_lists_everything
+  test_picker_columns_align
+  test_picker_name_jumps
+  test_picker_name_refilters_then_number
+  test_picker_out_of_range_number_matches_name
+  test_picker_empty_reply_cancels
+  test_one_worktree_is_a_noop
+  test_picks_current_worktree_from_subdir
+  test_picks_current_worktree_from_root_is_noop
+  test_dash_returns_to_previous
+  test_recovers_from_removed_cwd
+  test_rename_via_wt_cmd
+  test_default_command_name_is_wt
+} >/dev/null 2>&1
 
 printf '\n%s under %s: %d passed, %d failed\n' \
-  "$(basename "$0")" "${ZSH_VERSION:+zsh}${BASH_VERSION:+bash}" "$PASS" "$FAIL"
+  "$(basename "$0")" "${ZSH_VERSION:+zsh}${BASH_VERSION:+bash}" "$PASS" "$FAIL" >&3
 [ "$FAIL" -eq 0 ] || exit 1
 exit 0
