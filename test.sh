@@ -171,6 +171,17 @@ test_no_arg_picker_lists_everything() {
   eq "$PWD" "$P_BETA" "picking feature-beta's row from the no-arg picker jumps there"
 }
 
+test_picker_columns_align() {
+  # Labels differ in width (sidebranch, feature-alpha, (detached), main), so
+  # this only passes if the label column is padded and every path lines up.
+  menu=$(menu_from "$P_ALPHA")
+  widths=$(printf '%s\n' "$menu" | grep '/' | while IFS= read -r line; do
+    prefix="${line%%/*}"   # everything before the path's leading '/'
+    printf '%s\n' "${#prefix}"
+  done | sort -u | grep -c .)
+  eq "$widths" "1" "no-arg picker aligns every path into one column"
+}
+
 test_one_worktree_is_a_noop() {
   at "$SOLO"; before="$PWD"
   wt > "$ROOT/msg" 2>&1
@@ -196,6 +207,7 @@ test_matching_is_case_insensitive
 test_falls_back_to_path_match
 test_multi_match_shows_picker
 test_no_arg_picker_lists_everything
+test_picker_columns_align
 test_one_worktree_is_a_noop
 test_dash_returns_to_previous
 

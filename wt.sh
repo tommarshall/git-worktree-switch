@@ -168,7 +168,17 @@ _wt_pick() {
   fi
 
   # shellcheck disable=SC2154  # match_idx/wt_paths/wt_labels are the conductor's locals
-  local n=0 idx marker reply
+  # widest branch label among the candidates, so every path lines up in a column
+  local n=0 idx label_w=0 len
+  while [ "$n" -lt "${#match_idx[@]}" ]; do
+    idx="${match_idx[$n]}"
+    len=${#wt_labels[$idx]}
+    [ "$len" -gt "$label_w" ] && label_w="$len"
+    n=$((n + 1))
+  done
+
+  local marker reply
+  n=0
   while [ "$n" -lt "${#match_idx[@]}" ]; do
     idx="${match_idx[$n]}"
     if [ -n "$here" ] && [ "${wt_paths[$idx]}" = "$here" ]; then
@@ -177,11 +187,11 @@ _wt_pick() {
       marker=" "
     fi
     if [ "$marker" = "*" ]; then
-      printf '%s%3d) %s %s  %s%s\n' "$C_CUR" "$((n + 1))" "$marker" \
-        "${wt_labels[$idx]}" "${wt_paths[$idx]}" "$C_RST"
+      printf '%s%3d) %s %-*s  %s%s\n' "$C_CUR" "$((n + 1))" "$marker" \
+        "$label_w" "${wt_labels[$idx]}" "${wt_paths[$idx]}" "$C_RST"
     else
-      printf '%3d) %s %s  %s\n' "$((n + 1))" "$marker" \
-        "${wt_labels[$idx]}" "${wt_paths[$idx]}"
+      printf '%3d) %s %-*s  %s\n' "$((n + 1))" "$marker" \
+        "$label_w" "${wt_labels[$idx]}" "${wt_paths[$idx]}"
     fi
     n=$((n + 1))
   done
