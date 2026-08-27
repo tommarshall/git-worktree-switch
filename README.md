@@ -1,10 +1,9 @@
-# wt
+# git-worktree-switch
 
-Switch between git worktrees. One thing, well.
+Switch between git worktrees.
 
 `wt` is a tiny shell function that lists your git worktrees, matches one by
-name, and `cd`s you into it. That's all it does. No worktree creation, no
-removal — `git worktree add`/`remove` still own that.
+name with autocompletion, and `cd`s you into it.
 
 ## Requirements
 
@@ -18,7 +17,7 @@ No other dependencies. No awk, no sed, no fzf.
 Clone the repo somewhere permanent:
 
 ```bash
-git clone https://github.com/tommarshall/wt.git ~/.wt
+git clone https://github.com/tommarshall/git-worktree-switch.git ~/.git-worktree-switch
 ```
 
 Then `source` `wt.sh` from your shell. `wt` must be **sourced**, not run — it
@@ -28,13 +27,13 @@ subshell can't do that.
 Add one line to your shell startup file so it loads in every new shell:
 
 ```bash
-echo 'source ~/.wt/wt.sh' >> ~/.bashrc
+echo 'source ~/.git-worktree-switch/wt.sh' >> ~/.bashrc
 ```
 
 For zsh, use `~/.zshrc` instead:
 
 ```bash
-echo 'source ~/.wt/wt.sh' >> ~/.zshrc
+echo 'source ~/.git-worktree-switch/wt.sh' >> ~/.zshrc
 ```
 
 **macOS note:** macOS Terminal starts login shells, which read `~/.bash_profile`
@@ -44,7 +43,7 @@ rather than `~/.bashrc`. If you use bash on macOS, add the line to
 Open a new shell, or `source` the file once to use it right away:
 
 ```bash
-source ~/.wt/wt.sh
+source ~/.git-worktree-switch/wt.sh
 ```
 
 ## Usage
@@ -55,7 +54,7 @@ wt <query>    jump to the worktree matching <query>
 wt -          jump back to the previous worktree (like cd -)
 ```
 
-Matching is a **case-insensitive substring**. It checks branch names first,
+Matching is a case-insensitive substring. It checks branch names first,
 then paths. One match jumps straight there. Several matches drop you into the
 numbered picker, filtered to just those matches.
 
@@ -82,11 +81,10 @@ $ wt -
 ## Update
 
 ```bash
-cd ~/.wt && git pull
+cd ~/.git-worktree-switch && git pull
 ```
 
-Then open a new shell (or `source ~/.wt/wt.sh` again). There's no self-update —
-that's out of scope.
+Then open a new shell (or `source ~/.git-worktree-switch/wt.sh` again).
 
 ## Rename the command
 
@@ -99,7 +97,3 @@ WT_CMD="wtree"
 
 That one line renames the command, its tab completion, and every message. Open
 a new shell after changing it.
-
-## License
-
-MIT
