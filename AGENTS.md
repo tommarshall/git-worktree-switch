@@ -43,3 +43,14 @@ Both must be green. `lint` is shellcheck; `test` is `test.sh`.
 - **Name variables so they read.** Prefer a word to an abbreviation: `chosen`
   not `tgt`, `dir` not `p`, `needle`/`hay` for a match. Loop counters (`i`, `n`)
   and the glossary's own terms (`head`, `label`, `query`) are the exceptions.
+
+## Comments
+
+Comment sparingly, and make each one earn its place. Prefer code clear enough to
+need none; shell buys more comment than most languages, but stay lean.
+
+- **Say why, not what.** The gotcha, the reason a line exists, the constraint
+  that isn't visible — never a restatement of what the code plainly does.
+- **One line where one line does.** Cut anything the code already carries.
+- **Write for a new reader six months out.** A comment stands on its own, with
+  no history: no "used to", no previous implementation, no ticket or plan.

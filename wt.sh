@@ -18,21 +18,18 @@
 #   wt -          jump back to the previous worktree (like `cd -`)
 
 # --------------------------------------------------------------------------
-# Globals (declared once, up top)
+# Globals
 # --------------------------------------------------------------------------
 
-# The command name, driving the function, its completion, and every message.
-# Defaults to `wt`, but honours a WT_CMD exported before this file is sourced —
-# so you can rename the command from your shell profile without editing here.
+# Command name. Honour a value exported before sourcing, so users can rename
+# without editing this file.
 WT_CMD="${WT_CMD:-wt}"
 
-# Remembers the worktree you last jumped from, so `wt -` can return. Lives in
-# the interactive shell because this file is sourced, not run.
+# Worktree we last jumped from, for `wt -`. Persists because this file is sourced.
 WT_LAST=""
 
 #
-# Change directory to a worktree, remembering where we came from.
-# $1 = target path, $2 = path we're leaving (may be empty)
+# cd to a worktree, remembering where we left ($2, may be empty) for `wt -`.
 #
 _wt_cd() {
   [ -n "${ZSH_VERSION:-}" ] && emulate -L zsh 2>/dev/null && \
@@ -49,15 +46,9 @@ _wt_cd() {
 }
 
 #
-# Recover when the current directory has vanished — typically this very
-# worktree was removed out from under us. $PWD still holds the stale path but
-# the directory is gone, so git can't run at all. Find a surviving worktree to
-# stand on and cd there, so both git and the user are back on solid ground:
-#   1. climb the stale $PWD to the nearest ancestor that still exists and lives
-#      in a work tree (handles worktrees nested under the repo);
-#   2. failing that, fall back to WT_LAST — where we last jumped from (handles
-#      the classic bare-repo-with-sibling-worktrees layout).
-# Returns 1 if neither yields a directory git can run in.
+# Recover when $PWD has vanished (this worktree was removed under us): git can't
+# run from a gone directory. Climb to the nearest surviving ancestor worktree,
+# else fall back to WT_LAST. Returns 1 if neither is a directory git can run in.
 #
 _wt_recover() {
   [ -n "${ZSH_VERSION:-}" ] && emulate -L zsh 2>/dev/null && \
@@ -85,43 +76,34 @@ _wt_recover() {
 #
 # The records pipeline
 # --------------------------------------------------------------------------
-# A *record* is one worktree moving down the pipe:
-#   _wt_records → _wt_label → _wt_match → _wt_render
-# runs git once, labels, filters by query, then draws the menu. All four are
-# pure stdin→stdout filters — no shell state — so each is testable by piping
-# records in and checking what comes out, with no git and no fixture.
+# A record is one worktree: _wt_records → _wt_label → _wt_match → _wt_render.
+# All four are pure stdin→stdout filters (no shell state), so each is testable
+# by piping records in — no git, no fixtures.
 #
-# Records are NUL-framed, fixed arity, no separator, so a worktree path (which
-# may contain a newline — why git offers `-z`) survives intact:
-#   raw     = head \0 branch \0 path \0   from `_wt_records`
-#   display = label \0 path \0            from `_wt_label` onward
-# `head` is `bare` / `detached` / `branch` — the one field telling them apart.
+# Records are NUL-framed, fixed arity, so a path with a newline survives:
+#   raw     = head \0 branch \0 path \0      (_wt_records)
+#   display = label \0 path \0               (_wt_label onward)
+# head is `bare` / `detached` / `branch`.
 #
-# Only `_wt_fill` and `_wt_pick` share state by dynamic scope: `_wt_fill` fills
-# the arrays `wt_paths` / `wt_labels`, `_wt_pick` reads them and writes the one
-# scalar `pick` (its verdict). All three are `local` in `_wt_main` alone, so a
-# callee writes straight into the conductor's locals — no globals leak, and
-# nothing crosses a subshell (a `$(...)` capture would swallow the picker's
-# prompt). Holds under the zsh `emulate -L` guard, which localises options.
+# _wt_fill and _wt_pick are the exception: they share the conductor's locals by
+# dynamic scope (wt_paths / wt_labels / pick), never through a subshell — a
+# `$(...)` capture would swallow the picker's prompt.
 #
-# Print one raw record per worktree, bare repo included, straight from
+# Print one raw record per worktree, bare repo included, from
 # `git worktree list --porcelain -z`.
 #
 _wt_records() {
   [ -n "${ZSH_VERSION:-}" ] && emulate -L zsh 2>/dev/null && \
     setopt ksh_arrays sh_word_split no_nomatch
 
-  # Parse `list --porcelain -z` (double-NUL record boundaries) in pure shell
-  # (no awk/sed) per the house style. Branch on which lines a record carries:
-  # bare has neither HEAD nor branch; a detached HEAD emits `detached` and NO
-  # branch line — never assume a branch.
-  # NOTE: do NOT name a variable `path` here — in zsh `path` is the array form
-  # of $PATH, so `local path=...` would blow away PATH inside the function and
-  # git would vanish. Use `wtpath`.
+  # Records are double-NUL separated; branch on which lines each carries. A bare
+  # repo has neither HEAD nor branch; a detached HEAD emits `detached` and no
+  # branch line.
+  # `wtpath` not `path`: in zsh `path` aliases $PATH, so `local path=` hides git.
   local token wtpath="" branch="" head="branch"
   while IFS= read -r -d '' token; do
     if [ -z "$token" ]; then
-      # record boundary — emit the record we just read
+      # record boundary
       [ -n "$wtpath" ] && printf '%s\0%s\0%s\0' "$head" "$branch" "$wtpath"
       wtpath=""; branch=""; head="branch"
       continue
@@ -162,11 +144,9 @@ _wt_label() {
 }
 
 #
-# Read display records, print the ones matching $1: labels first, then paths
-# only if no label matched (case-insensitive substring). An empty query matches
-# every label, so it passes the whole set through unchanged. The fallback needs
-# the full set before it can decide, so buffer into local arrays first — these
-# are `_wt_match`'s OWN locals, not the conductor's.
+# Print records matching $1 (case-insensitive substring): labels first, paths
+# only if no label matched. An empty query matches everything. Buffers the full
+# set first, since the path fallback can't decide until every label has failed.
 #
 _wt_match() {
   [ -n "${ZSH_VERSION:-}" ] && emulate -L zsh 2>/dev/null && \
@@ -201,9 +181,8 @@ _wt_match() {
 }
 
 #
-# Conductor glue: run the pipeline for query $1 ("" = every worktree) and load
-# the resulting display records into `wt_paths` / `wt_labels` (the conductor's
-# locals, reached by dynamic scope — see the pipeline note above).
+# Run the pipeline for query $1 ("" = all) into the conductor's wt_paths /
+# wt_labels (dynamic scope — see the pipeline note above).
 #
 _wt_fill() {
   [ -n "${ZSH_VERSION:-}" ] && emulate -L zsh 2>/dev/null && \
@@ -218,11 +197,8 @@ _wt_fill() {
 }
 
 #
-# Render the numbered, aligned candidate menu from display records on stdin —
-# the same `label \0 path \0` records the pipeline produces. A pure filter like
-# the rest: records in, menu text out, no shell state and no tty, so the column
-# alignment and current-row marker can be asserted without driving `wt`.
-# $1 = current path (its row gets the `*` marker); $2 = `1` to colour that row.
+# Render the numbered, aligned menu from records on stdin.
+# $1 = current path (its row gets a `*`); $2 = `1` to colour that row.
 #
 _wt_render() {
   [ -n "${ZSH_VERSION:-}" ] && emulate -L zsh 2>/dev/null && \
@@ -237,7 +213,7 @@ _wt_render() {
     labels+=("$label"); paths+=("$wtpath")
   done
 
-  # widest branch label among the candidates, so every path lines up in a column
+  # widest label, so paths line up in a column
   local count="${#labels[@]}" n=0 label_w=0 len
   while [ "$n" -lt "$count" ]; do
     len=${#labels[$n]}
@@ -265,12 +241,9 @@ _wt_render() {
 }
 
 #
-# Show the candidate menu, read a choice, and set `pick` (the conductor's local)
-# to one verdict: "" = nothing selected, `row:<index>` = that row (0-based),
-# `query:<text>` = re-match by name/path. The effectful half of the picker:
-# decides colour from the tty, feeds `wt_paths` / `wt_labels` to `_wt_render`,
-# then reads and classifies the reply — it runs in the user's shell so the `cd`
-# lands there. $1 = current path. Always returns 0; the verdict is in `pick`.
+# Show the menu and read a choice into `pick`: "" = nothing, `row:<index>` =
+# that row (0-based), `query:<text>` = re-match by name/path. Runs in the user's
+# shell (not a subshell) so a later `cd` lands there. $1 = current path.
 #
 _wt_pick() {
   [ -n "${ZSH_VERSION:-}" ] && emulate -L zsh 2>/dev/null && \
@@ -278,7 +251,7 @@ _wt_pick() {
 
   local here="$1"
 
-  # --- colour: only on a tty, and only if git config doesn't forbid it ------
+  # colour: only on a tty, and only if git config allows
   local color=0
   if [ -t 1 ]; then
     local ui
@@ -302,9 +275,8 @@ _wt_pick() {
   printf 'pick › '
   IFS= read -r reply
 
-  # Classify the reply into `pick`: empty = bail; a pure number in range =
-  # `row:<index>`; anything else = `query:<text>`, so a branch named `1234` still
-  # resolves. The conductor strips the tag once, so a query with a `:` survives.
+  # Classify: empty bails; a number in range is `row:`; anything else is
+  # `query:`, so a branch named `1234` out of range still resolves as a search.
   # shellcheck disable=SC2034  # pick is the conductor's local (dynamic scope)
   if [ -z "$reply" ]; then
     printf '%s: nothing selected\n' "$WT_CMD" >&2
@@ -327,17 +299,14 @@ _wt_pick() {
 # Thin conductor: guard, fill, route (`-` / no-arg / query), then jump.
 #
 _wt_main() {
-  # --- portability guard (zsh only; local via emulate -L, does not leak) ---
+  # portability guard: zsh only, localised by emulate -L
   [ -n "${ZSH_VERSION:-}" ] && emulate -L zsh 2>/dev/null && \
     setopt ksh_arrays sh_word_split no_nomatch
 
   local query="${1:-}"
 
-  # --- recover from a deleted cwd -------------------------------------------
-  # If this worktree was removed while we were standing in it, $PWD no longer
-  # exists and every git command below would fail with a misleading "not in a
-  # git repository". Climb back to a surviving worktree first (see _wt_recover),
-  # then carry on normally so the user lands in the picker instead of an error.
+  # Recover a deleted cwd before any git runs, else git fails with a misleading
+  # "not in a git repository" (see _wt_recover).
   if [ ! -d "$PWD" ]; then
     _wt_recover || {
       printf '%s: current directory no longer exists (worktree removed?)\n' \
@@ -348,13 +317,12 @@ _wt_main() {
       "$WT_CMD" "$PWD" >&2
   fi
 
-  # --- where are we now (absolute worktree root) ----------------------------
+  # current worktree root
   local here=""
   here=$(git rev-parse --show-toplevel 2>/dev/null)
 
-  # --- `wt -` : jump back to the previous worktree --------------------------
-  # Handled before we fill/count worktrees so it still works as an escape
-  # hatch even when the current directory is gone or we're outside a repo.
+  # `wt -`: back to the previous worktree. Before fill/count so it works even
+  # when the cwd is gone or we're outside a repo.
   if [ "$query" = "-" ]; then
     if [ -z "${WT_LAST:-}" ]; then
       printf '%s: no previous worktree\n' "$WT_CMD" >&2
@@ -368,17 +336,15 @@ _wt_main() {
     return
   fi
 
-  # --- decide the target, or the set of candidates to pick from -------------
+  # decide the target, or the candidate set to pick from
   # shellcheck disable=SC2034  # wt_paths/wt_labels filled by _wt_fill; pick set by _wt_pick (dynamic scope)
   local wt_paths=() wt_labels=() chosen=-1 pick=""
 
   _wt_fill "$query"
   local count="${#wt_paths[@]}"
 
-  # Zero candidates: tell "not a repo" apart from "the query matched nothing".
-  # `here` is set inside a worktree but empty when standing in a bare repo, so
-  # fall back to a git-dir probe (true in a bare repo too) before blaming the
-  # query. Only ever runs on the empty path, never in the common case.
+  # Zero candidates: distinguish "not a repo" from "query matched nothing".
+  # `here` is empty in a bare repo, so probe the git-dir before blaming the query.
   if [ "$count" -eq 0 ]; then
     if [ -n "$query" ] && { [ -n "$here" ] || \
          git rev-parse --git-dir >/dev/null 2>&1; }; then
@@ -389,18 +355,15 @@ _wt_main() {
     return 1
   fi
 
-  # A lone candidate (the no other worktrees, or the only query match) skips the
+  # A lone candidate (the only worktree, or the only query match) skips the
   # picker; the jump below cd's to its root. `sole` is the narrower case of one
   # worktree and no query — it only changes the wording below.
   local sole=0
   [ "$count" -eq 1 ] && chosen=0
   [ -z "$query" ] && [ "$count" -eq 1 ] && sole=1
 
-  # --- picker: numbered list of candidates, read a choice -------------------
-  # Loop so a typed name (or out-of-range number) re-matches against ALL
-  # worktrees via the same pipeline the CLI uses. Dispatch the picker's `pick`
-  # verdict: `row:` picks and ends the loop; `query:` refills the candidates; ""
-  # bails (the picker already said why).
+  # Picker loop. A typed name (or out-of-range number) re-matches via the same
+  # pipeline: `row:` picks and ends, `query:` refills, "" bails.
   while [ "$chosen" -lt 0 ]; do
     _wt_pick "$here"
     case "$pick" in
@@ -417,10 +380,7 @@ _wt_main() {
     esac
   done
 
-  # --- go ---------------------------------------------------------------------
-  # "already there" means standing on the worktree root itself, not merely
-  # inside that worktree — compare against $PWD, not `here` (the root). Picking
-  # the current worktree from a subdirectory should still cd up to its root.
+  # "already there" means $PWD is the root itself; from a subdir we still cd up.
   if [ "${wt_paths[$chosen]}" = "$PWD" ]; then
     if [ "$sole" -eq 1 ]; then
       printf '%s: no other worktrees\n' "$WT_CMD"
@@ -452,18 +412,15 @@ _wt() {
     return 0
   fi
 
-  # Label through `_wt_label` so how a Label is formed lives in ONE place
-  # (branch, else `(detached)` / `(unknown)`), with the bare repo already
-  # dropped. Offer each Label and its worktree folder basename.
-  # ACCEPTED LIMIT: `compgen -W` word-splits on IFS, so a Label or path with
-  # whitespace won't survive. NUL-safe completion needs bash 4's `readarray -d`,
-  # but this runs in bash 3.2 — keep the space-join.
+  # Reuse `_wt_label` so labels form in one place; offer each label and the
+  # worktree folder basename. Limit: `compgen -W` splits on IFS, so a label or
+  # path with whitespace won't survive (NUL-safe needs bash 4, we target 3.2).
   while IFS= read -r -d '' label && IFS= read -r -d '' wtpath; do
     [ -n "$label" ]  && candidates="$candidates $label"
     [ -n "$wtpath" ] && candidates="$candidates ${wtpath##*/}"
   done < <(_wt_records | _wt_label)
 
-  # SC2207: word-splitting is the intended completion idiom; mapfile is absent in bash 3.2.
+  # SC2207: word-splitting is the completion idiom here.
   # shellcheck disable=SC2207
   COMPREPLY=( $(compgen -W "$candidates" -- "$cur") )
 }

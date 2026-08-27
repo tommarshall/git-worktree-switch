@@ -2,20 +2,17 @@
 #
 # test.sh - dependency-free tests for wt.sh. No bats, no frameworks.
 #
-# Fixtures a throwaway git repo (bare + several worktrees) in a tmpdir, sources
-# wt.sh, and asserts the switcher behaves per the spec. Runs the whole suite
-# under BOTH bash and zsh - that dual run is the real guard on the bash-3.2 /
+# Fixtures a throwaway git repo in a tmpdir, sources wt.sh, and asserts. Runs
+# under BOTH bash and zsh — that dual run is the real guard on the bash-3.2 /
 # zsh portability promise.
 #
-#   ./test.sh          # drives bash then zsh
-#   bash test.sh       # same (driver re-execs both)
-#   zsh  test.sh       # same
+#   ./test.sh    # drives bash then zsh (bash/zsh test.sh do the same)
 #
 # Written in the common bash/zsh subset: no arrays, no top-level `local`, quote
 # everything, feed the picker with here-strings so its `cd` lands in our shell.
 
 # --------------------------------------------------------------------------
-# Driver: unless we're the inner run, execute this same file under each shell.
+# Driver: unless we're the inner run, re-exec this file under each shell.
 # --------------------------------------------------------------------------
 if [ -z "${WT_TEST_INNER:-}" ]; then
   overall=0
@@ -39,10 +36,8 @@ WT_SH="$HERE/wt.sh"
 PASS=0
 FAIL=0
 
-# fd 3 is our report channel. The run block below points stdout/stderr at
-# /dev/null so the function-under-test's own chatter (destinations it cd's to,
-# picker menus, the "pick ›" prompt) stays out of the results; ok/bad still
-# reach the terminal by writing to fd 3.
+# fd 3 is our report channel: the run block sends stdout/stderr to /dev/null to
+# mute the function-under-test's chatter, while ok/bad still reach the terminal.
 exec 3>&1
 
 ok()  { PASS=$((PASS + 1)); printf '  ok   - %s\n' "$1" >&3; }
@@ -65,36 +60,30 @@ lacks() { # haystack needle name
 # Move to a worktree before exercising `wt`; a failure here is a test failure.
 at() { cd "$1" || bad "cannot cd into $1"; }
 
-# Emit each argument as a NUL-terminated field — the on-the-wire form of the
-# records pipeline. A record is just its fields in order, so `nul a b c` is one
-# three-field record and `nul a b c d e f` is two. Kept out of a shell variable
-# deliberately: variables can't hold NUL, so records only ever flow down a pipe.
+# Emit each argument as a NUL-terminated field — the wire form of a record. So
+# `nul a b c` is one three-field record; `nul a b c d e f` is two.
 nul() { printf '%s\0' "$@"; }
 
-# Run a records filter and render its NUL-framed output with NULs shown as `|`,
-# so a whole record stream compares as one plain string (trailing `|` and all).
+# Run a records filter, showing NULs as `|` so a record stream compares as one
+# plain string.
 piped() { "$@" | tr '\0' '|'; }
 
-# Given captured picker output and a worktree path, return the menu number
-# printed beside that path. Lets the picker tests select by identity rather
-# than by a hard-coded, order-dependent index.
+# The menu number printed beside a path, so picker tests select by identity, not
+# a hard-coded index.
 rownum_for() { # menu path
   row=$(printf '%s\n' "$1" | grep -F "$2")
   printf '%s' "${row%%)*}" | tr -dc '0-9'
 }
 
-# Show the picker menu without choosing anything (empty reply => "nothing
-# selected" on stderr, no cd), so we can inspect it in a subshell cleanly.
+# Show the picker menu without choosing (empty reply => no cd), to inspect it.
 menu_from() { # startdir args...
   at "$1"; shift
   wt "$@" <<< "" 2>/dev/null
 }
 
-# Source wt.sh from a *fresh* shell so nothing the suite already sourced leaks
-# in, set WT_CMD as asked (empty arg => unset, exercising the ${WT_CMD:-wt}
-# default), then jump with the given command name and echo where it landed.
-# This is how we prove the command-name wiring from a clean slate. Runs under
-# whichever shell the suite is currently driving.
+# Source wt.sh in a fresh shell (no leakage from the suite), set WT_CMD as asked
+# (empty => unset, exercising the ${WT_CMD:-wt} default), jump, echo where it
+# landed. Runs under whichever shell the suite is driving.
 jump_in_fresh_shell() { # wt_cmd_value(empty to unset)  command_name
   shbin=bash; [ -n "${ZSH_VERSION:-}" ] && shbin=zsh
   # shellcheck disable=SC2016  # the $vars are for the inner shell, not this one
@@ -113,8 +102,8 @@ trap cleanup EXIT
 
 # --------------------------------------------------------------------------
 # Fixture: a bare clone with five non-bare worktrees + a lone single-worktree
-# repo. Paths are captured straight from git (`rev-parse --show-toplevel`) so
-# expectations equal exactly what `wt` will cd to - no symlink surprises.
+# repo. Paths come from git (`rev-parse --show-toplevel`), so expectations equal
+# exactly what `wt` cd's to — no symlink surprises.
 # --------------------------------------------------------------------------
 build_fixture() {
   ROOT=$(mktemp -d "${TMPDIR:-/tmp}/wttest.XXXXXX")
@@ -125,8 +114,8 @@ build_fixture() {
     cd "$seed" || exit 1
     git config user.email t@example.com
     git config user.name  tester
-    # --no-verify: a dev's *global* git-good-commit hook would otherwise fire
-    # in this throwaway repo and infinite-loop on a /dev/tty that isn't here.
+    # --no-verify: a dev's global commit hook could fire here and hang on a
+    # /dev/tty that isn't present.
     git commit -q --no-verify --allow-empty -m init
     git branch feature-alpha
     git branch feature-beta
@@ -165,9 +154,7 @@ build_fixture() {
 }
 
 # --------------------------------------------------------------------------
-# Unit tests for the pure filters — records in, records out, no git, no
-# fixture. This is what the records seam buys: matching and labelling can be
-# asserted directly, without a bare clone and five worktrees.
+# Unit tests for the pure filters — records in, records out, no git, no fixture.
 # --------------------------------------------------------------------------
 
 test_label_uses_branch_when_present() {
@@ -191,7 +178,7 @@ test_label_drops_bare() {
 }
 
 test_match_labels_before_paths() {
-  # 'main' hits a label; the path-only record must not come through.
+  # 'main' hits a label, so the path-only record must not come through.
   got=$(nul main /p/x feature /home/main-app | piped _wt_match main)
   eq "$got" "main|/p/x|" "_wt_match: a label hit wins; paths are not consulted"
 }
@@ -218,9 +205,7 @@ test_match_empty_query_passes_all() {
 }
 
 test_render_aligns_paths() {
-  # Labels of differing widths must still leave every path in one column — the
-  # menu's output on stdin records, no fixture. Count distinct "text before the
-  # first /" widths; alignment means exactly one.
+  # Count distinct "text before the first /" widths; alignment means exactly one.
   menu=$(nul short /p/a longbranchname /p/b | _wt_render "" 0)
   widths=$(printf '%s\n' "$menu" | grep '/' | while IFS= read -r line; do
     prefix="${line%%/*}"
@@ -230,10 +215,8 @@ test_render_aligns_paths() {
 }
 
 test_render_marks_the_current_row() {
-  # The marker is a literal `*`, a glob metacharacter — so match it with
-  # `grep -F` (fixed string), never the case-glob `has`/`lacks`, where `*`
-  # would match anything and prove nothing. Marked rows carry `) *`; unmarked
-  # rows have a space there instead, so they never do.
+  # The marker is a literal `*` (a glob metacharacter), so match it with
+  # `grep -F`, not the case-glob `has`/`lacks` where `*` matches anything.
   menu=$(nul main /p/main dev /p/dev | _wt_render /p/dev 0)
   if printf '%s\n' "$menu" | grep -F /p/dev | grep -qF ') *'; then
     ok "_wt_render: the current worktree's row is marked with *"
@@ -293,25 +276,22 @@ test_no_arg_picker_lists_everything() {
 }
 
 test_picker_name_jumps() {
-  # At the no-arg picker, typing a name that matches exactly one worktree
-  # jumps there — reusing the CLI's branch/path matching.
+  # At the picker, a name matching exactly one worktree jumps there.
   at "$P_MAIN"; wt <<< "alpha"
   eq "$PWD" "$P_ALPHA" "picker: a name matching one worktree jumps there ('alpha')"
 }
 
 test_picker_name_refilters_then_number() {
-  # A name matching several re-shows the picker filtered to those; a follow-up
-  # number then picks from the filtered set. Two lines feed the two reads.
+  # A name matching several re-filters; a follow-up number picks. Two input
+  # lines feed the two reads.
   menu=$(menu_from "$P_MAIN" feature)
   at "$P_MAIN"; wt <<< "$(printf 'feature\n%s\n' "$(rownum_for "$menu" "$P_BETA")")"
   eq "$PWD" "$P_BETA" "picker: a name matching several re-filters, then a number picks"
 }
 
 test_picker_out_of_range_number_matches_name() {
-  # An out-of-range number is not a row, so it falls through to name/path
-  # matching rather than dead-ending. 'quxpath' contains no digits, so match a
-  # branch/path substring that a stray number can't hit; here we just assert
-  # the fallthrough path reports no match cleanly for a non-matching number.
+  # An out-of-range number is no row, so it falls through to name/path matching
+  # rather than dead-ending — here reporting no match cleanly.
   at "$P_MAIN"; wt <<< "999" > "$ROOT/msg" 2>&1 || true
   msg=$(cat "$ROOT/msg")
   has "$msg" "no worktree matches: 999" "picker: an out-of-range number falls through to matching"
@@ -333,9 +313,8 @@ test_query_no_match_blames_query() {
   has "$msg" "no worktree matches: zzz-no-such" "a non-matching query in a repo reports no match"
 }
 
-# The same query, but from outside any repo, blames the missing repo — not the
-# query. An empty candidate set doesn't distinguish "no worktrees" from "no
-# match", so the repo is probed directly to tell the two apart.
+# The same query outside any repo blames the missing repo, not the query — an
+# empty candidate set can't tell the two apart, so the repo is probed directly.
 test_query_outside_repo_reports_no_repo() {
   mkdir -p "$ROOT/norepo"
   at "$ROOT/norepo"
@@ -367,9 +346,8 @@ test_one_worktree_from_subdir_cds_to_root() {
   lacks "$msg" "already there" "one worktree from subdir: does not say 'already there'"
 }
 
-# From a subdirectory of the current worktree, picking that same worktree should
-# cd up to its root — not report "already there" and leave you in the subdir.
-# "already there" only applies when you're standing on the root itself.
+# Picking the current worktree from a subdir cds up to its root — "already
+# there" applies only when standing on the root itself.
 test_picks_current_worktree_from_subdir() {
   mkdir -p "$P_MAIN/sub/deep"
   at "$P_MAIN/sub/deep"
@@ -395,10 +373,8 @@ test_dash_returns_to_previous() {
   eq "$PWD" "$P_ALPHA" "'wt -' returns to the previous worktree"
 }
 
-# When the worktree you're standing in is removed, $PWD points at a directory
-# that no longer exists and git can't run. `wt` should climb back to a
-# surviving worktree (here via the WT_LAST fallback) instead of erroring, then
-# carry on and resolve the requested jump.
+# With the current worktree removed, $PWD is gone and git can't run. `wt` should
+# climb back to a survivor (here via WT_LAST) instead of erroring, then jump.
 test_recovers_from_removed_cwd() {
   git -C "$BARE" worktree add -q "$ROOT/wt-doomed" -b doomed >/dev/null 2>&1
   at "$P_ALPHA"; wt feature-beta         # arm WT_LAST=P_ALPHA (a survivor)
@@ -420,10 +396,9 @@ test_default_command_name_is_wt() {
   eq "$got" "$P_BETA" "with WT_CMD unset the command defaults to 'wt'"
 }
 
-# Completion draws its Labels from _wt_label, so it names the detached worktree
-# and drops the bare repo. The suite's one brush with arrays: bash's completion
-# contract passes words in COMP_WORDS, and _wt must run in this shell (not a
-# subshell) so the COMPREPLY it sets is ours to read. Empty current word => all.
+# Completion draws its labels from _wt_label, so it names the detached worktree
+# and drops the bare repo. _wt must run in this shell (not a subshell) so the
+# COMPREPLY it sets is ours to read; an empty current word offers everything.
 test_completion_labels_come_from_wt_label() {
   at "$P_MAIN"
   COMP_WORDS=(wt ""); COMP_CWORD=1
@@ -443,7 +418,7 @@ test_completion_labels_come_from_wt_label() {
 {
   build_fixture
 
-  # pure filters — no git needed, but build_fixture already sourced wt.sh
+  # pure filters
   test_label_uses_branch_when_present
   test_label_names_detached
   test_label_names_unknown
