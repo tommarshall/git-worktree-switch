@@ -14,8 +14,9 @@ Both must be green. `lint` is shellcheck; `test` is `test.sh`.
 
 ## Invariants (easy to break, span the whole file)
 
-- **No external tools.** Pure bash/zsh only — no awk, sed, or fzf. Parse with
-  shell built-ins.
+- **No deps beyond git and coreutils.** Lean on shell built-ins first; a
+  ubiquitous POSIX tool like `tr` is fine where it's clearly simpler. No awk,
+  sed, or fzf — parse with built-ins. Nothing a user would have to install.
 - **Runs in bash 3.2 and zsh.** Every function opens with the `emulate -L zsh`
   guard. No `mapfile`, no bash-4-isms.
 - **Sourced, not executed.** State (`WT_LAST`) lives in the user's shell. Don't

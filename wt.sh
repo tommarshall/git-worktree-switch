@@ -237,7 +237,7 @@ _wt_pick() {
   # An empty reply is a deliberate bail-out. A pure number in range picks that
   # row. ANYTHING else — a name, or a number that isn't a row — is handed back
   # to the conductor as a fresh query (requery) to re-match by name/path, so a
-  # branch literally named `1234` still resolves. Pure builtins here: no `tr`.
+  # branch literally named `1234` still resolves.
   if [ -z "$reply" ]; then
     printf '%s: invalid selection\n' "$WT_CMD" >&2
     return 1

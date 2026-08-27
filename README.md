@@ -9,8 +9,10 @@ name with autocompletion, and `cd`s you into it.
 
 - git 2.36+
 - bash or zsh
+- coreutils
 
-No other dependencies. No awk, no sed, no fzf.
+Nothing to install beyond git and the standard coreutils every Unix already
+ships (e.g. `tr`). No `awk`, no `sed`, no `fzf`.
 
 ## Install
 
