@@ -24,6 +24,8 @@ Both must be green. `lint` is shellcheck; `test` is `test.sh`.
   into arrays declared `local` in `_wt_main` only. Keep that shape; don't add
   globals and don't re-`local` those names in the callees.
 - **Rename via `WT_CMD`.** One variable at the top drives the command name, its
-  completion, and every message. Never hardcode `wt`.
+  completion, and every message. Never hardcode `wt`. Its default is set with
+  `${WT_CMD:-wt}` so a value exported before sourcing wins — keep that form so
+  users can rename from their profile without editing the script.
 - **Never name a variable `path`.** In zsh `path` is `$PATH` as an array;
   clobbering it makes git vanish. Use `wtpath`.

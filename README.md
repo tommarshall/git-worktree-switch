@@ -99,12 +99,14 @@ Then open a new shell (or `source ~/.git-worktree-switch/wt.sh` again).
 
 ## Rename the command
 
-If `wt` clashes with something else, change the command name. Edit `wt.sh` and
-set the variable at the top:
+If `wt` clashes with something else, rename the command from your shell profile
+— no need to edit `wt.sh`. Export `WT_CMD` **before** you source the script:
 
 ```bash
-WT_CMD="wtree"
+export WT_CMD="wtree"
+source ~/.git-worktree-switch/wt.sh
 ```
 
-That one line renames the command, its tab completion, and every message. Open
-a new shell after changing it.
+That renames the command, its tab completion, and every message. Keeping the
+name in your profile (rather than editing the script) means updates pull in
+cleanly. Open a new shell after changing it.

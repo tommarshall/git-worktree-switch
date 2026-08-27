@@ -74,6 +74,23 @@ menu_from() { # startdir args...
   wt "$@" <<< "" 2>/dev/null
 }
 
+# Source wt.sh from a *fresh* shell so nothing the suite already sourced leaks
+# in, set WT_CMD as asked (empty arg => unset, exercising the ${WT_CMD:-wt}
+# default), then jump with the given command name and echo where it landed.
+# This is how we prove the command-name wiring from a clean slate. Runs under
+# whichever shell the suite is currently driving.
+jump_in_fresh_shell() { # wt_cmd_value(empty to unset)  command_name
+  shbin=bash; [ -n "${ZSH_VERSION:-}" ] && shbin=zsh
+  # shellcheck disable=SC2016  # the $vars are for the inner shell, not this one
+  WT_CMD_ARG="$1" WT_SH="$WT_SH" DEST="$P_ALPHA" "$shbin" -c '
+    if [ -n "$WT_CMD_ARG" ]; then export WT_CMD="$WT_CMD_ARG"; else unset WT_CMD; fi
+    cd "$DEST" || exit 1
+    . "$WT_SH"
+    "$1" feature-beta >/dev/null 2>&1
+    printf %s "$PWD"
+  ' _ "$2"
+}
+
 # shellcheck disable=SC2317,SC2329  # invoked indirectly via the EXIT trap below
 cleanup() { [ -n "${ROOT:-}" ] && rm -rf "$ROOT"; }
 trap cleanup EXIT
@@ -245,6 +262,16 @@ test_recovers_from_removed_cwd() {
   eq "$PWD" "$P_QUX" "recovers from a removed cwd and still resolves the jump"
 }
 
+test_rename_via_wt_cmd() {
+  got=$(jump_in_fresh_shell gwt gwt)
+  eq "$got" "$P_BETA" "WT_CMD exported before sourcing renames the command ('gwt' jumps)"
+}
+
+test_default_command_name_is_wt() {
+  got=$(jump_in_fresh_shell "" wt)
+  eq "$got" "$P_BETA" "with WT_CMD unset the command defaults to 'wt'"
+}
+
 # --------------------------------------------------------------------------
 # Run
 # --------------------------------------------------------------------------
@@ -263,6 +290,8 @@ test_picker_empty_reply_cancels
 test_one_worktree_is_a_noop
 test_dash_returns_to_previous
 test_recovers_from_removed_cwd
+test_rename_via_wt_cmd
+test_default_command_name_is_wt
 
 printf '\n%s under %s: %d passed, %d failed\n' \
   "$(basename "$0")" "${ZSH_VERSION:+zsh}${BASH_VERSION:+bash}" "$PASS" "$FAIL"

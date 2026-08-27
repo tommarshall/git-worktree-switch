@@ -21,9 +21,10 @@
 # Globals (declared once, up top)
 # --------------------------------------------------------------------------
 
-# The command name. To rename the command, change this ONE line — the function,
-# its completion, and every message follow it.
-WT_CMD="wt"
+# The command name, driving the function, its completion, and every message.
+# Defaults to `wt`, but honours a WT_CMD exported before this file is sourced —
+# so you can rename the command from your shell profile without editing here.
+WT_CMD="${WT_CMD:-wt}"
 
 # Remembers the worktree you last jumped from, so `wt -` can return. Lives in
 # the interactive shell because this file is sourced, not run.
