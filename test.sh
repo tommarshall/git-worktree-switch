@@ -344,12 +344,27 @@ test_query_outside_repo_reports_no_repo() {
   has "$msg" "not in a git repository" "a query outside any repo reports 'not in a git repository'"
 }
 
-test_one_worktree_is_a_noop() {
-  at "$SOLO"; before="$PWD"
+# One worktree lands you on its root: a no-op from the root, a cd-up from a
+# subdir. Either way it says "no other worktrees", not the generic "already there".
+test_one_worktree_from_root_says_only_worktree() {
+  solo_root=$(git -C "$SOLO" rev-parse --show-toplevel)
+  at "$solo_root"; before="$PWD"
   wt > "$ROOT/msg" 2>&1
   msg=$(cat "$ROOT/msg")
-  eq  "$PWD" "$before"           "one worktree: does not move"
-  has "$msg" "only one worktree" "one worktree: prints the no-op message"
+  eq    "$PWD" "$before"        "one worktree from root: does not move"
+  has   "$msg" "no other worktrees"  "one worktree from root: reports 'no other worktrees'"
+  lacks "$msg" "already there"  "one worktree from root: not the generic 'already there'"
+}
+
+test_one_worktree_from_subdir_cds_to_root() {
+  solo_root=$(git -C "$SOLO" rev-parse --show-toplevel)
+  mkdir -p "$solo_root/sub/deep"
+  at "$solo_root/sub/deep"
+  wt > "$ROOT/msg" 2>&1
+  msg=$(cat "$ROOT/msg")
+  eq    "$PWD" "$solo_root"    "one worktree from subdir: cds to its root"
+  has   "$msg" "no other worktrees" "one worktree from subdir: reports 'no other worktrees'"
+  lacks "$msg" "already there" "one worktree from subdir: does not say 'already there'"
 }
 
 # From a subdirectory of the current worktree, picking that same worktree should
@@ -453,7 +468,8 @@ test_completion_labels_come_from_wt_label() {
   test_picker_empty_reply_cancels
   test_query_no_match_blames_query
   test_query_outside_repo_reports_no_repo
-  test_one_worktree_is_a_noop
+  test_one_worktree_from_root_says_only_worktree
+  test_one_worktree_from_subdir_cds_to_root
   test_picks_current_worktree_from_subdir
   test_picks_current_worktree_from_root_is_noop
   test_dash_returns_to_previous

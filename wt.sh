@@ -389,16 +389,12 @@ _wt_main() {
     return 1
   fi
 
-  if [ -z "$query" ]; then
-    # no arg: candidates are every worktree
-    if [ "$count" -le 1 ]; then
-      printf '%s: only one worktree\n' "$WT_CMD"
-      return 0
-    fi
-  else
-    # exactly one match jumps; several fall through to the picker
-    [ "$count" -eq 1 ] && chosen=0
-  fi
+  # A lone candidate (the no other worktrees, or the only query match) skips the
+  # picker; the jump below cd's to its root. `sole` is the narrower case of one
+  # worktree and no query — it only changes the wording below.
+  local sole=0
+  [ "$count" -eq 1 ] && chosen=0
+  [ -z "$query" ] && [ "$count" -eq 1 ] && sole=1
 
   # --- picker: numbered list of candidates, read a choice -------------------
   # Loop so a typed name (or out-of-range number) re-matches against ALL
@@ -426,10 +422,17 @@ _wt_main() {
   # inside that worktree — compare against $PWD, not `here` (the root). Picking
   # the current worktree from a subdirectory should still cd up to its root.
   if [ "${wt_paths[$chosen]}" = "$PWD" ]; then
-    printf '%s: already there\n' "$WT_CMD"
+    if [ "$sole" -eq 1 ]; then
+      printf '%s: no other worktrees\n' "$WT_CMD"
+    else
+      printf '%s: already there\n' "$WT_CMD"
+    fi
     return 0
   fi
-  _wt_cd "${wt_paths[$chosen]}" "$here"
+  _wt_cd "${wt_paths[$chosen]}" "$here" || return 1
+  # A move prints its destination (see _wt_cd); for the sole worktree, add why
+  # it moved on its own — you didn't pick, there was just nowhere else to go.
+  [ "$sole" -eq 1 ] && printf '%s: no other worktrees\n' "$WT_CMD"
 }
 
 #
