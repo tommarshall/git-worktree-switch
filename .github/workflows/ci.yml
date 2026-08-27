@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: shellcheck wt.sh test.sh
+      - run: make lint
 
   test:
     strategy:
@@ -22,4 +22,4 @@ jobs:
       # test.sh drives both bash and zsh; Ubuntu runners lack zsh out of the box.
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y zsh
-      - run: ./test.sh
+      - run: make test
