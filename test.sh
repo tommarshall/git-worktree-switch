@@ -254,6 +254,12 @@ test_falls_back_to_path_match() {
   eq "$PWD" "$P_QUX" "falls back to a path match when no branch matches ('quxpath')"
 }
 
+# A successful jump must exit 0: `&& cd` chains on the caller's side break when
+# `wt` leaks a nonzero status from an ordinary move.
+test_successful_jump_exits_zero() {
+  at "$P_MAIN"; wt alpha; eq "$?" "0" "a successful jump exits 0"
+}
+
 test_multi_match_shows_picker() {
   menu=$(menu_from "$P_MAIN" feature)
   rows=$(printf '%s\n' "$menu" | grep -cE '^ *[0-9]+\)')
@@ -435,6 +441,7 @@ test_completion_labels_come_from_wt_label() {
 
   test_single_match_is_branch_first
   test_falls_back_to_path_match
+  test_successful_jump_exits_zero
   test_multi_match_shows_picker
   test_no_arg_picker_lists_everything
   test_picker_name_jumps

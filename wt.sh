@@ -392,7 +392,11 @@ _wt_main() {
   _wt_cd "${wt_paths[$chosen]}" "$here" || return 1
   # A move prints its destination (see _wt_cd); for the sole worktree, add why
   # it moved on its own — you didn't pick, there was just nowhere else to go.
-  [ "$sole" -eq 1 ] && printf '%s: no other worktrees\n' "$WT_CMD"
+  # An `if`, not a trailing `&&`: as the last line, `[ false ] && ...` would
+  # leak exit 1 on every ordinary jump.
+  if [ "$sole" -eq 1 ]; then
+    printf '%s: no other worktrees\n' "$WT_CMD"
+  fi
 }
 
 #
